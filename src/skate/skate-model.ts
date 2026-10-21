@@ -587,6 +587,13 @@ export interface SkateInput {
   steer: number;
   /** Jump key still down — he is crouched, winding up. */
   chargeHeld: boolean;
+  /**
+   * Crouched without the wind-up — the pad's pump. LT/RT and the left stick are
+   * Skate's crouch buttons, and on Skate's sheet neither of them is the ollie:
+   * the pop is the right-stick flick. This bends the legs and feeds the pump
+   * impulse but can never fire `olliePressed`, so a trigger cannot launch him.
+   */
+  crouchHeld?: boolean;
   /** Jump key just let go: the pop. On a rail it is the pop OUT. */
   olliePressed: boolean;
   kickflipPressed: boolean;
@@ -705,6 +712,7 @@ export const EMPTY_INPUT: SkateInput = {
   brake: false,
   steer: 0,
   chargeHeld: false,
+  crouchHeld: false,
   olliePressed: false,
   kickflipPressed: false,
   heelflipPressed: false,
@@ -1252,7 +1260,7 @@ export class SkateModel {
     // --- wind-up ------------------------------------------------------------
     // Announced BEFORE the tricks below, so the frame he lets go the crouch is
     // already released when the pop asks for the trick clip.
-    this.setCharging(grounded && input.chargeHeld);
+    this.setCharging(grounded && (input.chargeHeld || input.crouchHeld === true));
 
     // --- the balance he is holding, if he is up on two wheels ----------------
     // Before the trick block, so the frame it runs out is the frame the book is
@@ -1307,7 +1315,7 @@ export class SkateModel {
     // frame of rise.)
     const yBefore = this.position.y;
     if (this.state === "rolling") {
-      _drive.pump = input.chargeHeld;
+      _drive.pump = input.chargeHeld || input.crouchHeld === true;
       _drive.steer = steer;
       _drive.coast = !input.throttle;
       const spare = this.roll(dt);

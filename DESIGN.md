@@ -24,12 +24,161 @@ Key art: `cms2hv48901lw22lppfy2tr8c` (street, golden hour, UI-free).
   by:** R, instant reset, same block
 
 ## Build plan & status
-Now: **15. MOBILE CONTROLS (2026-09-26)** — working mode: **focused change**.
-The player asked: *"create a controls for mobile"*. Found already wired and
-re-verified this milestone rather than rebuilt: stick + OLLIE/FLIP/GRAB/MANUAL
-+ RESET + pause, phone-only chunk, `tsc` 0, `vite build` clean. Milestone 14's
-table is kept below; milestone 12's rows still marked ⏳/❌/⚠️ have NOT been
-absorbed here and are still owed.
+Now: **18. THE PAD IS SKATE'S PAD (2026-10-20)** — working mode: **focused
+change**. After milestone 16 the player plugged in a pad and said *"that is not
+skate 3s controls"*, then handed over the control page itself. He was right, and
+the page says more than the right stick: LT/RT are **Pump/Grab**, LS up **pumps**
+and LS down **powerslides**, push is **A/X**, brake is **B**, the session marker
+is **LB + D-pad**, and Y / RB / Back / the bare D-pad are all *other* features
+this game does not have. The pad now follows that page button for button; the
+flick-it engine from the first pass stays. Milestone 16's polling, dead zones,
+edge handling and its one measured bug fix (the staleness gate) stay; its mapping
+does not. Milestone 12's rows still marked ⏳/❌/⚠️ have NOT been absorbed here
+and are still owed.
+
+### Milestone 18 — THE PAD IS SKATE'S PAD (2026-10-20)
+
+**Source:** the Skate 3 manual's COMPLETE CONTROLS table, read directly —
+`Pump/Grab LT/RT`, `Push A/X`, `Brake B`, `Get on/off board Y`, `Steer,
+powerslide, revert, body rotation/flips LS`, `Flickit tricks, grinds, tweaks,
+manuals, bail moves RS`, `Session marker mode LB` + D-pad, `Skitch RB`, `Grab
+object (off board) RB`, `Instant replay BACK` — plus its FLICKIT page ("move
+[RS] in a specific direction or pattern": Ollie, Nollie, Kickflip, Pop Shuvit,
+FS Pop Shuvit, 360 Pop Shuvit, 360 Flip) and the JP control table, which
+resolves the glyphs the PDF text strips: LS up = pump (crouch), LS down =
+powerslide, A = right-foot push, X = left-foot push, LT/RT = grab, with a half
+pull pumping.
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | right stick is a **flick-it engine**, not four bindings: it samples speed and direction, opens a throw, and reads the trick off where the stick stops (up = ollie, up-right = kickflip, up-left = heelflip, left/right = shove-it) | `skate/gamepad.ts` |
+| 2 | the crouch is where the sheet puts it — **LS up** and **LT/RT** hold Space (this game's wind-up), and letting either go is the pop; the flick no longer crouches, it just throws the trick | `skate/gamepad.ts` |
+| 3 | a flick with no pump behind it taps the pop itself, and a flip the flick named fires 90 ms behind it — the model only flips with the wheels off the deck | `skate/gamepad.ts` |
+| 4 | **LT/RT do two jobs as printed:** pump on the ground, grab (`KeyX`) in the air | `skate/gamepad.ts` |
+| 5 | **LS down** is the powerslide, which is this game's E (the deck laid square across a line) | `skate/gamepad.ts` |
+| 6 | A and X both push, B brakes; the old keyboard-remap buttons are gone (LS push/brake, LB slide, RB grab, Y flip) | `skate/gamepad.ts` |
+| 7 | **LB + D-pad** is the session-marker jump — this game's reset. Y, RB, Back and the bare D-pad do nothing, and the file says which feature each one is | `skate/gamepad.ts` |
+| 8 | partial RS holds are still the manual / nose manual — the manual meter's own words are "where you need to move [RS]" | `skate/gamepad.ts` |
+| 9 | `poll` takes `grounded` so the pump and the manuals stay on the ground while the trigger becomes a grab and the flick keeps working in the air; Start ends the reading frame, so a trick mid-flick cannot queue behind the pause card | `skate/gamepad.ts`, `main.ts` |
+| 10 | the controls screen prints the pad's own layout, including what the dead buttons are for | `ui/menu.ts` |
+
+**Still impossible here, reported and not faked:** nollies (down-flicks),
+varials and 360 flips (multi-flick patterns), reverts, tweaks while grabbing,
+skitching, anything off-board, instant replay, hand gestures, Hall of Meat.
+
+Verified: `tsc` exit 0 · `vite build` clean · touch chunk still split · the whole
+layout and the flick engine driven through a stubbed standard pad on a controlled
+clock. Layout: A → KeyW, X → KeyW (left foot), B → KeyS, LS up → Space and its
+release pops, LS down → KeyE, LT held on the ground → Space and in the air →
+KeyX, LB + D-pad → exactly one KeyR, and Y / RB / Back / bare D-pad produce
+nothing at all. Flick: pull → pump → up-right = one pop and KeyF one frame and
+90 ms later; straight up from neutral = a single Space tap and no flip; up-left
+= KeyG; sideways = Space tap + KeyC; a second flick inside the 260 ms cooldown
+adds nothing; a partial hold = ShiftLeft and a partial up hold = KeyQ after
+220 ms; Start drops the queued flip; a pull in the air presses nothing.
+
+END TO END on the built bundle with a virtual pad at 480×270: the menu opened at
+184 s, Start opened the pause card, Start again closed it, and A took the speedo
+from 0 to 11 km/h. That run proves the new poll signature and the airborne read
+do not break the ride; it cannot prove the flick or the pump, because software
+WebGL ran at 0.4–0.6 fps and a flick's speed test is honest at those frame times
+— a throw spread over 2.5 seconds is not a throw.
+
+NOT verified: a physical controller and the real feel of the gesture — the
+flick's thresholds (`FLICK_SPEED 2.4` stick-units/s, `FLICK_MAG 0.55`) and the
+pump's band (0.5 on / 0.3 off) are tuned against the stub, not a thumb. They are
+the first thing to revisit on real hardware.
+
+**Corrections, 2026-10-21 — after the player handed over the Skate control page
+and said the buttons were still wrong.** Their PDF is the **Skate 2** book (the
+same Flick-It table), and it disagrees with Skate 3 in exactly three places:
+`BACK` opens the session marker/cell phone (not LB), `LB` is grab-objects, `RB`
+is the online menu. Read as one layout, the two books agree on everything that
+matters here, and two rows of this milestone were wrong:
+
+| # | change | file |
+| - | ------ | ---- |
+| 11 | the reset fires from **LB + D-pad AND Back + D-pad** — the two books put the marker on different buttons and both are the same jump; Back alone stays silent, as the sheet has it | `skate/gamepad.ts` |
+| 12 | **LT/RT and the left stick are not the ollie, at all.** They never touch Space: they set a crouch of their own (`padCrouch` → `SkateInput.crouchHeld`), which bends the legs and feeds the pump impulse and **cannot fire an ollie** — the ride's pop is `olliePressed` alone, and only the flick taps it. The player's report was exact: *"rt and lt are not fucking ollie"* | `skate/input.ts`, `skate/gamepad.ts`, `skate/skate-model.ts` |
+| 13 | the flick's speed test is no longer hostage to the renderer: one real throw spread over a 2.5 s frame (software WebGL, a slow laptop) divided down to 0.4 u/s and never registered, so the frame's contribution to `speed` is capped at 50 ms | `skate/gamepad.ts` |
+| 14 | the controls screen now prints the sheet's own lines — LS, RS, LT/RT, A/X·B, LB or Back + D-pad, Start — plus one footnote naming the buttons this game does not carry (Y, RB, the bare D-pad). The six added rows overflowed 720 px (the heading was cut in half), so the screen centres with `safe center` and spends a short viewport's height on rows, not on gaps and the title | `ui/menu.ts` |
+
+Verified after the corrections, stubbed standard pad, controlled clock: **LT held
+for a second and released → `crouch true` / `crouch false` and ZERO Space
+events**, on the real input source `chargeHeld false, crouchHeld true,
+olliePressed false`, and standing up fires nothing; RT held + a flick →
+`crouch true`, one Space tap, `crouch false`; flick from neutral → one ollie;
+up-right → ollie + KeyF 90 ms later; sideways → ollie + KeyC; LB+D-pad → one
+KeyR; Back+D-pad → one KeyR; Back alone → nothing; A/X → KeyW; B → KeyS; LT in
+the air → KeyX (no crouch, no pop); Start → pause. `tsc` 0, `vite build` clean,
+touch chunk still split. Live on the built bundle with the virtual pad: menu at
+190 s, Start paused and resumed, A took the speedo 0 → 11 km/h, no page errors.
+The controls screen was captured at 1280×720 with the new rows and the footnote
+in frame.
+
+### Milestone 17 — THE LOADER SAID NOTHING (2026-10-20)
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | `DefaultLoadingManager.onProgress` drives 60%→90% with `Lacing up… loaded/total`, monotonic (total grows as items join) and silent once the loader is gone | `main.ts` |
+| 2 | each of board / skater / spot-dress is raced against a 60 s deadline; the job is NOT cancelled, so a late body still mounts and late dressing still arrives | `main.ts` |
+| 3 | the timer is cleared on settle, so a healthy boot never logs a phantom timeout | `main.ts` |
+
+Verified on the built bundle at 320×180: 4 s "Lacing up…" 60% → 16 s
+"16/40" 72% → 180 s "67/67" 90% → 190 s "Go" and the menu. Progress is real;
+the machine is simply slow (software WebGL + CPU decode). The deadline covers
+the async failure the bar could not: a host that accepts a connection and never
+answers can no longer hold the boot forever. It cannot interrupt synchronous
+decode — no timer can — which is why the count, not the timeout, is what fixes
+the "is it stuck?" question.
+
+The boot's two console 404s (noticed in 18's smoke pass) were the browser asking
+for `/favicon.ico` because no icon was declared: `index.html` now points at the
+`favicon.svg` the build already ships, and the 404s are gone.
+
+### Milestone 16 — GAMEPAD SUPPORT (2026-10-20)
+
+> **Superseded by 18 the same day.** The polling, the dead zones, the edge
+> handling and the staleness-gate fix below all stand. The MAPPING does not: 16
+> remapped the keyboard onto the pad, and the player's answer was *"that is not
+> skate 3s controls"*. Read 18 for the layout that shipped.
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | `GamepadLayer` polls the first connected standard-mapping pad once a frame, emits edges from levels, releases everything on unplug | `skate/gamepad.ts` (new) |
+| 2 | `padSteer` = `touchSteer`; `padControl` presses the same codes through `press`/`release` but skips the clock gate, because a poll from inside the reading frame cannot be stale (the clock gate dropped every press at 0.6 fps) | `skate/input.ts` |
+| 3 | poll runs every frame outside the paused branch with `poll(!paused)`: Start can end a pause, holds are dropped while the ride is not reading, and no press queues behind a card | `main.ts` |
+| 4 | touch-stick field/comment now names both writers; no desktop cost added when no pad is attached | `skate/input.ts` |
+
+**Bound (all real verbs):** LS carve + push/brake with the touch gate's
+hysteresis + air spin (spin is the steer axis); RS up/down nose manual / manual,
+RS flick left/right heelflip / 360 shove-it; A push, B brake, X grab, Y kickflip;
+LB slide across; RB grab (right thumb); LT/RT crouch, release to pop; D-pad
+L/R heelflip / shove-it; D-pad down and Back reset (the sheet's "back to your
+session marker" is this game's reset); Start pause.
+
+**NOT in this game — reported, not faked:** off-board walking/running and
+Y-dismount, handplants, Dark Catch and R3, Coffin / Jesus Pose, Miracle Whip,
+object dragging, session markers / D-pad up, the cell phone and Back's challenge
+map, online lobbies, and a true flick-it gesture grammar (RS flicks here are two
+discrete tricks, not a directional flick engine). Each is a gameplay feature,
+not a missing binding.
+
+Verified: `tsc` exit 0 · `vite build` clean · touch chunk still split ·
+mapping exercised on a stubbed standard pad (dead zone rescale, push/brake
+hysteresis, held-Y = one kickflip, LT/RT OR-to-pop, RS flick edges, unplug
+releases all), then END TO END in a real Chromium session with a virtual pad
+injected test-side: the pad was polled 6 times in 15 s (software WebGL ran at
+0.4–0.6 fps), 15 s of stick-up + A took the speed readout from 0 to 16 km/h
+(keyboard W under the same conditions: 11 km/h), and Start opened the pause
+card with Start again closing it. That run also caught the staleness-gate bug
+above — the first pass showed 0 km/h with the pad reporting the button
+correctly, which is why the gate is gone from `padControl`. Screenshots:
+menu, keyboard run, pad run at 480×270 and 800×450.
+
+NOT verified: a physical controller, and therefore the real feel — dead-zone
+taste, trigger travel, rumble (not implemented). The mapping is proven; the
+hardware is not.
 
 ### Milestone 15 — MOBILE CONTROLS (2026-09-26)
 

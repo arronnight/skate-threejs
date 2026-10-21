@@ -21,9 +21,17 @@
 // analogue where two keys are not — and it still goes through the same ramp.
 //
 // WHAT THIS COSTS A DESKTOP SESSION: one `this.touchStick !== 0` test per frame
-// in `consume()`, against a field whose only writer is `touchSteer`, whose only
-// caller is a module a desktop session never loads. It is 0 for the whole life of
-// a desktop session, so `target` is the digital target it has always been.
+// in `consume()`, against a field whose writers (`touchSteer`, `padSteer`) live
+// in modules a keyboard-only desktop session never loads or never spins up. It
+// is 0 for the whole life of such a session, so `target` is the digital target
+// it has always been.
+//
+// The gamepad (`src/skate/gamepad.ts`) is the third hand and takes the same
+// road: `padSteer` IS `touchSteer`, and `padControl` presses the same codes
+// through the same `press`/`release`. The pad supplies edges the browser hands
+// it as levels; it supplies no input rule. It is the one door that skips the
+// clock gate, because the boot polls it from inside the reading frame — see
+// `padControl`.
 //
 // The flip keys are EDGE-triggered: holding F does not machine-gun kickflips.
 // `consume()` hands out the pressed flags exactly once. The grab and the two
@@ -147,13 +155,14 @@ export class SkateInputSource {
   /** When `consume()` last ran. Nothing has read this source until it does. */
   private lastRead = Number.NEGATIVE_INFINITY;
   /**
-   * The touch stick's carve axis, and 0 whenever no thumb is on it — which is
-   * every frame of every desktop session, because `touchSteer` is its only
-   * writer and the touch layer is `touchSteer`'s only caller. That is what makes
-   * the one extra test in `consume()` a provable no-op on desktop rather than an
-   * argument about one.
+   * The analogue carve axis, written by a thumb (`touchSteer`) or a stick
+   * (`padSteer`), and 0 whenever neither is deflected — which is every frame of
+   * a desktop session with no pad attached, because nothing else writes it.
    */
   private touchStick = 0;
+
+  /** The pad's crouch (LT/RT, left stick up) — see `padCrouch`. */
+  private crouchHeld = false;
 
   /** Is the ride actually reading this frame? See `READ_TIMEOUT_MS`. */
   private live(): boolean {
@@ -282,6 +291,55 @@ export class SkateInputSource {
   }
 
   /**
+   * The pad's carve axis, through the same field the touch stick writes.
+   *
+   * One analogue axis for both hands, deliberately: `consume()` reads a single
+   * `touchStick` and runs it through the one ramp `STEER_SMOOTH` defines, so a
+   * pad at deflection d is byte-identical to a key held at d — and to a thumb at
+   * d. A second path would give the controller a different ride.
+   */
+  padSteer(x: number): void {
+    this.touchSteer(x);
+  }
+
+  /**
+   * A gamepad button, through the same `press`/`release` pair a key and a thumb
+   * use. `src/skate/gamepad.ts` owns which physical button means which code; it
+   * owns no input rule, and it cannot, because this door has none of its own.
+   *
+   * NO CLOCK GATE HERE, unlike `touchControl`, and the difference is not an
+   * oversight. A key and a thumb arrive as EVENTS, between frames, so
+   * `touchControl` has to ask whether anything is reading this source — that is
+   * what stops a title-screen tap queueing a trick. The pad is not an event: the
+   * boot polls it from inside the frame that is about to consume it, and the
+   * caller polls it only while the ride is reading (`poll(!paused)`). A clock
+   * gate here measured the wrong thing entirely — it asked how long since the
+   * last frame and refused input on exactly the slow frames a pad press was
+   * most likely to land on. Measured at 0.6 fps (software WebGL): six polls in
+   * fifteen seconds, every one of them dropped, with the pad reporting the
+   * button correctly the whole time.
+   */
+  padControl(code: TouchControlCode, down: boolean): void {
+    if (down) this.press(code);
+    else this.release(code);
+  }
+
+  /**
+   * The pad's crouch — LT/RT and the left stick, and NEVER the ollie.
+   *
+   * Skate's sheet puts the pop on the right-stick flick: a trigger or the left
+   * stick bends his legs and pumps, and letting either go stands him up. Space
+   * is the keyboard's and the phone's wind-up (hold to load, release to pop), so
+   * the pad does not touch Space at all — it sets a crouch of its own, which
+   * the ride bends the legs and feeds the pump impulse with. That is the whole
+   * of the difference between `chargeHeld` and `crouchHeld` in `SkateInput`,
+   * and it is why holding LT can no longer launch him.
+   */
+  padCrouch(down: boolean): void {
+    this.crouchHeld = down;
+  }
+
+  /**
    * Drop everything held. A lost window does this (see `onBlur`), and so does
    * the touch layer when its controls leave the screen with a thumb still down:
    * a pause card opening under a finger on OLLIE must not leave him crouched for
@@ -295,6 +353,7 @@ export class SkateInputSource {
     this.windingWas = false;
     this.pushLocked = false;
     this.touchStick = 0;
+    this.crouchHeld = false;
   }
 
   consume(dt: number): SkateInput {
@@ -375,6 +434,7 @@ export class SkateInputSource {
       // Spending the wind-up stands him back up on the spot — the crouch is
       // released the same frame the push begins, not when Space comes up.
       chargeHeld: winding && !this.chargeSpent,
+      crouchHeld: this.crouchHeld,
       olliePressed: this.olliePressed,
       kickflipPressed: this.kickflipPressed,
       heelflipPressed: this.heelflipPressed,

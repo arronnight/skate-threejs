@@ -21,6 +21,7 @@ import type { TrickName } from "./skate/skate-model";
 import type { GrindKind, Stance, TrickId } from "./skate/contracts";
 import type { GrindLine } from "./world/surface";
 import { SkateInputSource } from "./skate/input";
+import { GamepadLayer } from "./skate/gamepad";
 import { SkaterRig } from "./skate/skater-rig";
 import { SkaterAnim, type PostureTweak } from "./skate/skater-anim";
 import { createRagdoll } from "./skate/ragdoll";
@@ -501,6 +502,67 @@ async function boot(): Promise<void> {
   bootStep(0.45, "Grip tape and trucks…");
   const boardJob = rig.loadBoard(tier, gltf).catch((e) => console.warn("[board]", e));
 
+  /**
+   * THE ASSET STAGE, COUNTED.
+   *
+   * Everything from here to "Dropping in…" is downloads plus the CPU that
+   * follows them — the body's GLB and KTX2 transcode, the block's textures and
+   * props. It used to report NOTHING: the bar sat at 60% for the whole stage,
+   * which on a cold connection or a CPU-only renderer is minutes, so a slow
+   * boot and a hung one looked identical to a player.
+   *
+   * `DefaultLoadingManager` is the one place every loader in this boot is
+   * already wired to (the shared `gltf.loader`, the skater's own
+   * `new GLTFLoader()`, and the plain `TextureLoader`s the block's dressers
+   * use), so it is the honest counter without a second bookkeeping system. The
+   * counts only ever move FORWARD: `total` grows as new items start, and a bar
+   * that walked backwards when a texture joined the queue would read as a
+   * restart.
+   */
+  let assetFraction = 0.6;
+  let loaderDone = false;
+  THREE.DefaultLoadingManager.onProgress = (_url: string, loaded: number, total: number): void => {
+    // The manager is global and keeps counting through character swaps and spot
+    // changes; after the loader is gone there is no bar to move.
+    if (loaderDone || total <= 0) return;
+    const next = 0.6 + 0.3 * Math.min(1, loaded / total);
+    if (next < assetFraction) return;
+    assetFraction = next;
+    bootStep(next, `Lacing up… ${loaded}/${total}`);
+  };
+
+  /**
+   * …and a deadline per job, because "slow" must never become "forever".
+   *
+   * A host that accepts the connection and then never finishes, or a transcode
+   * that never returns, used to leave the loader at 60% with no message and
+   * nothing the player could do. These jobs are NOT cancelled — the promise
+   * keeps running, `mountSkater` still mounts the body the moment it lands, and
+   * the spot's dressing still arrives — the deadline only stops the BAR waiting
+   * for it. Sixty seconds is far past any healthy load (the body measures
+   * 3.5–3.6 s on a normal machine) and still short enough that a dead host is a
+   * minute of someone's evening rather than all of it.
+   */
+  const ASSET_DEADLINE_MS = 60_000;
+  const deadline = <T,>(job: Promise<T>, what: string): Promise<T | undefined> =>
+    new Promise<T | undefined>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.warn(`[boot] ${what} still loading after ${ASSET_DEADLINE_MS} ms — starting without it`);
+        resolve(undefined);
+      }, ASSET_DEADLINE_MS);
+      const finish = (value: T | undefined): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      job.then(finish, () => finish(undefined));
+    });
+
+
   bootStep(0.6, "Lacing up…");
   /**
    * Everything that has to happen to a freshly-loaded body before it can be
@@ -590,7 +652,11 @@ async function boot(): Promise<void> {
     .dress(scene, field, tier, renderer, gltf)
     .catch((e) => console.warn("[spot]", e));
 
-  await Promise.all([boardJob, skaterJob, dressJob]);
+  await Promise.all([
+    deadline(boardJob, "board"),
+    deadline(skaterJob, "skater"),
+    deadline(dressJob, "spot dress"),
+  ]);
   bootStep(0.9, "Dropping in…");
 
   // --- runtime plumbing ------------------------------------------------------
@@ -921,6 +987,28 @@ async function boot(): Promise<void> {
     },
   });
 
+  /**
+   * …and the third hand: a standard-mapping pad, POLLED once a frame.
+   *
+   * It costs one `navigator.getGamepads()` call per frame on a machine with no
+   * pad attached — the API returns an empty array — and nothing on a browser
+   * that does not have the API at all. Every button crosses the same
+   * `padControl`/`padSteer` doors the keyboard and thumbs already use, so the
+   * push/pop tie-break, the trick latches and the staleness gate apply without a
+   * second copy. Start is the deliberate exception: pause belongs to the boot,
+   * exactly as Escape does, so it arrives as `onPause` rather than a ride code.
+   */
+  const gamepad = new GamepadLayer({
+    input,
+    // The SAME guard Escape has, and for the same reason: at the title screen
+    // pause is not a toggle, it is the menu — Start there would unpause a game
+    // the player has not dropped into and hand him a running skater behind the
+    // menu.
+    onPause: () => {
+      if (!atTitle) setPaused(!paused);
+    },
+  });
+
   // The animated backdrop is minutes behind the rest of the boot, so the menu
   // opens on the key art and upgrades itself in place when the loop lands.
   // Phone tiers keep the still: two preloading HD decoders while the scene is
@@ -996,6 +1084,7 @@ async function boot(): Promise<void> {
   });
 
   bootStep(1, "Go");
+  loaderDone = true;
   hud.hideLoader();
 
   // --- the loop --------------------------------------------------------------
@@ -1084,6 +1173,14 @@ async function boot(): Promise<void> {
     // could not see; the clamp was silently doing a second job it was never
     // written for.
     governor.frame(frameMs);
+
+    // THE PAD, before anything reads the ride. The flag is the answer to "is
+    // the ride reading this frame" — while paused the layer drops its holds and
+    // reads only Start, which is the one input that has to work with the world
+    // stopped. `grounded` is the ride's own answer, and the pad uses it for the
+    // one place Skate cares: the pull-down crouch and the manuals are ground
+    // moves, while the flick-it itself works in the air.
+    gamepad.poll(!paused, !skate.airborne);
 
     if (!paused) {
       // THE QUEST CARD'S INPUT GATE. The source is still READ every frame —

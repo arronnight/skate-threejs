@@ -393,7 +393,7 @@ const CSS = `
   color: rgba(255,255,255,.55); pointer-events: none; }
 
 .ctl-wrap { position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: clamp(10px, 2vh, 22px);
+  align-items: center; justify-content: safe center; gap: clamp(10px, 2vh, 22px);
   overflow-y: auto; padding: 3vh 0; }
 .ctl-head { font-family: Anton, Impact, sans-serif; text-transform: uppercase;
   font-size: clamp(30px, 6vw, 62px); color: #fff; letter-spacing: .04em;
@@ -421,6 +421,23 @@ const CSS = `
   font-size: clamp(15px, 2vw, 24px); color: #ffd23d; text-shadow: 1px 2px 0 rgba(0,0,0,.85); }
 .ctl-rows span { font-size: clamp(11px, 1.35vw, 16px); letter-spacing: .16em; font-weight: 600;
   color: rgba(255,255,255,.85); text-transform: uppercase; text-shadow: 1px 2px 0 rgba(0,0,0,.85); }
+/* The buttons this game deliberately does not carry, said once rather than as a
+   seventh row the 720 px column cannot hold. */
+.ctl-note { max-width: min(92vw, 900px); text-align: center; font-size: clamp(10px, 1.05vw, 12px);
+  letter-spacing: .14em; font-weight: 600; text-transform: uppercase; color: rgba(255,255,255,.6);
+  text-shadow: 1px 2px 0 rgba(0,0,0,.85); }
+/* The pad block added six rows under the keyboard's eighteen, and at 720 px the
+   centred column then ran off BOTH ends — the heading was cut in half and the
+   last key sat on the bottom edge (measured 2026-10-21). The safe centring keeps
+   the overflow at the bottom where the scroll can reach it, and a short viewport
+   spends its height on the rows instead of the gaps and the heading. */
+@media (max-height: 800px) and (min-width: 900px) {
+  .ctl-wrap { gap: 4px; padding: 0; }
+  .ctl-head { font-size: clamp(24px, 3.6vw, 34px); }
+  .ctl-rows { gap: 1px clamp(14px, 2.4vw, 34px); }
+  .ctl-rows span { line-height: 1.1; }
+  .ctl-wrap .menu-btn { font-size: clamp(20px, 2.4vw, 28px); }
+}
 /* The button column is pinned to 52% for the title screen's stack; here it is
    the last item under the list, and the list is now long enough to reach 52%.
    Centring falls to the wrap's align-items, never a transform — the stagger
@@ -559,6 +576,24 @@ const CONTROLS: [string, string][] = [
   ["R", "Reset"],
   ["ESC", "Pause"],
   ["ARROW KEYS", "Push, carve and brake too"],
+  // THE PAD IS A THIRD HAND, not a second layout: every row above still works
+  // with one plugged in, which is why this is three lines and not a second
+  // list. The sticks and the triggers cross the same input source as the
+  // keyboard (`padControl`/`padSteer`), so the same latches and the same
+  // pop-on-release hold here too.
+  //
+  // These three rows are Skate 3's own control page, which is where the pad's
+  // layout comes from — not the keyboard remapped: the left stick pumps, the
+  // right stick IS the trick sheet, the triggers pump and grab, and the session
+  // marker button plus the D-pad is the reset. Y, RB, Back and the bare D-pad
+  // are on the sheet too and do nothing here, because this game has no off-board
+  // state, nothing to skitch, no replay editor and no hand gestures.
+  ["PAD · LEFT STICK", "Steer · UP pumps (crouch) · DOWN powerslides"],
+  ["…RIGHT STICK", "Flick UP = the only ollie · up-diagonals flip · sideways shove-it"],
+  ["LT / RT", "Crouch/pump on the ground · grab in the air"],
+  ["A / X  ·  B", "Push, right foot / left foot · brake"],
+  ["LB OR BACK + D-PAD", "Session-marker jump — the reset"],
+  ["START", "Pause"],
 ];
 
 export class Menu {
@@ -716,6 +751,7 @@ export class Menu {
           <div class="ctl-rows stagger" style="--i:1">
             ${CONTROLS.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join("")}
           </div>
+          <div class="ctl-note">Y, RB and the bare D-pad are on Skate's sheet — dismount, skitch, gestures — and there is none of that here</div>
           <div class="menu-list">
             <button class="menu-btn stagger" style="--i:2" data-act="back">Back</button>
           </div>
