@@ -75,6 +75,12 @@ export interface GamepadLayerOptions {
   input: GamepadSink;
   /** Start. The same intent Escape and the touch pause button raise. */
   onPause: () => void;
+  /**
+   * The pad moved. The boot uses it to make the on-screen legend speak for the
+   * controller instead of the keyboard — a rail that says SPACE to a player
+   * holding A is naming the wrong device.
+   */
+  onActivity?: () => void;
 }
 
 /** Left stick carve dead zone, rescaled so full deflection still reaches 1. */
@@ -163,6 +169,7 @@ function readFlick(x: number, y: number): Flick | null {
 export class GamepadLayer {
   private readonly sink: GamepadSink;
   private readonly onPause: () => void;
+  private readonly onActivity?: () => void;
   /** Every control this layer is currently holding. */
   private readonly down = new Set<TouchControlCode>();
   private steer = 0;
@@ -191,10 +198,13 @@ export class GamepadLayer {
   private crouched = false;
   /** No pad last poll — used to avoid re-releasing every frame. */
   private idle = true;
+  /** Last seen pad state, so `onActivity` fires on a change, not every frame. */
+  private padSig = "";
 
   constructor(options: GamepadLayerOptions) {
     this.sink = options.input;
     this.onPause = options.onPause;
+    this.onActivity = options.onActivity;
   }
 
   /** The first connected pad, or null. Polled every frame; cheap when absent. */
@@ -256,6 +266,32 @@ export class GamepadLayer {
     this.pending = null;
   }
 
+  /**
+   * Tell the boot the pad is the hand in use, once per change.
+   *
+   * The signature is coarse on purpose (8 steps per axis): the point is "did
+   * anything move", and a stick resting inside a deadzone must not keep
+   * re-announcing itself. A pad that is merely connected does not count — only
+   * one that is being used — so a keyboard player with a controller on the desk
+   * keeps the keycaps.
+   */
+  private activity(pad: Gamepad): void {
+    let active = false;
+    let sig = "";
+    for (const a of pad.axes) {
+      if (Math.abs(a) > 0.25) active = true;
+      sig += Math.round(a * 8) + ",";
+    }
+    for (const b of pad.buttons) {
+      const on = b.pressed || b.value > 0.5;
+      if (on) active = true;
+      sig += on ? "1" : "0";
+    }
+    if (sig === this.padSig) return;
+    this.padSig = sig;
+    if (active) this.onActivity?.();
+  }
+
   /** Drop everything, the way a lost window does — a pad that is gone. */
   private releaseAll(): void {
     this.releaseHolds();
@@ -301,6 +337,7 @@ export class GamepadLayer {
       return;
     }
     this.idle = false;
+    this.activity(pad);
 
     // Start is the one input that has to work with the world stopped, and the
     // frame it lands on ends the ride's reading: a trick still in the air of the

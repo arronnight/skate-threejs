@@ -1015,6 +1015,29 @@ const BANK_GRACE = 0.12;
  *     the gauge, and the gauge used to come up with nothing on screen naming
  *     the thing that saves it.
  */
+/**
+ * The same rail, said in the pad's own words.
+ *
+ * The player plugged a controller in and the screen went on telling him SPACE,
+ * F/G/C and X — the buttons he was NOT holding. A legend that names the wrong
+ * device is the same class of lie as a dead button, so the rail follows whichever
+ * hand moved last: `setPadMode` is called from the pad layer's activity hook and
+ * cleared by the next keydown. Words, not arrows: the rail's font is a mono face
+ * and an arrow that falls back to tofu is worse than "up".
+ */
+const PAD_CONTROL_ROWS: readonly (readonly [string, readonly string[], boolean])[] = [
+  ["Push", ["A", "X"], false],
+  ["Carve", ["L-Stick"], false],
+  ["Ollie", ["R-Stick", "up"], false],
+  ["Flip", ["R-Stick", "diag"], false],
+  ["Grab", ["LT", "RT"], true],
+  ["Slide across", ["L-Stick", "down"], true],
+  ["Manual", ["R-Stick", "hold"], true],
+  ["Look around", ["R-Stick"], false],
+  ["Reset", ["LB", "D-Pad"], false],
+  ["Pause", ["Start"], false],
+];
+
 const CONTROL_ROWS: readonly (readonly [string, readonly string[], boolean])[] = [
   ["Ride", ["W", "A", "S", "D"], false],
   ["Ollie", ["Space"], true],
@@ -1057,6 +1080,9 @@ export class Hud {
   private speedNum: HTMLSpanElement;
   private stanceEl: HTMLSpanElement;
   private balanceEl: HTMLDivElement;
+  private controlsEl: HTMLDivElement;
+  /** The rail currently speaks for the pad (see `setPadMode`). */
+  private padFor = false;
   private heldEl: HTMLDivElement;
   private gauge: HTMLDivElement;
   private needle: HTMLDivElement;
@@ -1208,11 +1234,7 @@ export class Hud {
       <div id="balance">
         <div class="gauge">${"<i></i>".repeat(BALANCE_TICKS)}<div class="needle"></div></div>
       </div>
-      <div id="controls">${CONTROL_ROWS.map(
-        ([skill, keys, held]) =>
-          `<span class="s">${held ? "<em>Hold</em>" : ""}${esc(skill)}</span>` +
-          `<span class="k">${keys.map((k) => `<b class="keycap">${esc(k)}</b>`).join("")}</span>`,
-      ).join("")}</div>
+      <div id="controls"></div>
       <div id="centre" class="stencil"></div>
       <div id="results" class="sk-screen sk-wash"></div>`;
     document.body.appendChild(this.root);
@@ -1224,6 +1246,8 @@ export class Hud {
     this.speedNum = this.root.querySelector("#speedo .n") as HTMLSpanElement;
     this.stanceEl = this.root.querySelector("#speed .sw") as HTMLSpanElement;
     this.balanceEl = this.root.querySelector("#balance") as HTMLDivElement;
+    this.controlsEl = this.root.querySelector("#controls") as HTMLDivElement;
+    this.renderControls();
     this.heldEl = this.root.querySelector("#held") as HTMLDivElement;
     this.gauge = this.root.querySelector("#balance .gauge") as HTMLDivElement;
     this.needle = this.root.querySelector("#balance .needle") as HTMLDivElement;
@@ -1490,6 +1514,27 @@ export class Hud {
    * wheels-coming-down edge, 29.2° at the tail scrape), so this is the second
    * opinion. A/D is what fights the needle — the controls screen says so.
    */
+  /**
+   * Which hand the rail speaks for. Cheap and idempotent — the pad layer calls it
+   * on every change of the pad's state, and a keydown takes it back.
+   */
+  setPadMode(on: boolean): void {
+    if (on === this.padFor) return;
+    this.padFor = on;
+    this.renderControls();
+  }
+
+  private renderControls(): void {
+    const rows = this.padFor ? PAD_CONTROL_ROWS : CONTROL_ROWS;
+    this.controlsEl.innerHTML = rows
+      .map(
+        ([skill, keys, held]) =>
+          `<span class="s">${held ? "<em>Hold</em>" : ""}${esc(skill)}</span>` +
+          `<span class="k">${keys.map((k) => `<b class="keycap">${esc(k)}</b>`).join("")}</span>`,
+      )
+      .join("");
+  }
+
   setBalance(value: number | null): void {
     // No `balance-up` class any more, and that is a deletion worth naming: the
     // old control legend was two wrapped rows across the bottom of the screen

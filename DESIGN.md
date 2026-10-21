@@ -24,7 +24,24 @@ Key art: `cms2hv48901lw22lppfy2tr8c` (street, golden hour, UI-free).
   by:** R, instant reset, same block
 
 ## Build plan & status
-Now: **18. THE PAD IS SKATE'S PAD (2026-10-20)** — working mode: **focused
+Now: **20. HOP OFF THE RAIL (2026-10-21)** — working mode: **focused
+change**. The complaint behind "the buttons are still wrong" was never a
+button: *"when you hop on a rail, i need to be able to hop off of it without
+getting stuck to the rail."* He was right and the cause was in the catcher, not
+the input. A pop off a line already marked the line spent, but `cleared()`
+re-armed it once he was 0.7 m **above** the spot he left — which is exactly
+where an ollie puts him — so the line took him back on the way down. Measured
+with a new harness: **5 of 19 rideable lines** re-caught him after a deliberate
+pop (both long ledges, the platform lip, the dock edge, the back coping). Now
+**0 of 19**, and the line is his again the moment he lands.
+
+Previous focus, kept for the record: **19. THE LEGEND SPEAKS PAD (2026-10-21)** — working mode: **focused
+change**. Milestone 18 is built, corrected and previewed (LT/RT are not the
+ollie; the flick is the only pop). The one lie left was on screen: with a
+controller in hand the rail still said `SPACE`, `F G C`, `X`, `SHIFT` — the
+buttons he was not holding. The rail now follows the hand that moved last.
+
+Previous focus, kept for the record: **18. THE PAD IS SKATE'S PAD (2026-10-20)** — working mode: **focused
 change**. After milestone 16 the player plugged in a pad and said *"that is not
 skate 3s controls"*, then handed over the control page itself. He was right, and
 the page says more than the right stick: LT/RT are **Pump/Grab**, LS up **pumps**
@@ -115,6 +132,62 @@ touch chunk still split. Live on the built bundle with the virtual pad: menu at
 190 s, Start paused and resumed, A took the speedo 0 → 11 km/h, no page errors.
 The controls screen was captured at 1280×720 with the new rows and the footnote
 in frame.
+
+### Milestone 20 — HOP OFF THE RAIL (2026-10-21)
+
+The pop itself was never missing: `olliePressed` while `state === "grind"` calls
+`endGrind` and `pop("ollie", grade)`. What was missing was the *leaving*. Popping
+off retires the line and stores the exit spot (`Grinder.retire` → `spent`,
+`spentAt`, `RECATCH_CLEAR = 0.7`), so the line cannot take him again **on the
+spot**. But `cleared()` re-arms it on either **0.7 m of horizontal distance OR
+0.7 m of height above the exit spot** — and a normal ollie is taller than that.
+So the pop cleared the guard at the apex, `flight()` offered the line the moment
+`vy <= 0`, and the line took him straight back on the way down. The taller the
+pop, the more reliably it stuck.
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | a deliberate pop off a line remembers its id (`hopOff`), and `tryCatchGrind` refuses **that line** for the rest of the air — declined like the square gate, so the Grinder's next catch retires it | `skate/skate-model.ts` |
+| 2 | the ban ends the moment he is back on the ground — `land()` and `enterRagdoll()` both clear it — so the same rail takes him again on his next approach, and popping off one rail still lets him land on a different one | `skate/skate-model.ts` |
+| 3 | a harness for the question itself: ride every line in the spot on, pop off five frames later, and watch for a catch of the same line before he lands, plus `rearmed` after | `tools/grind-hopoff.mjs` |
+
+Measured on the model (`node --experimental-strip-types tools/grind-hopoff.mjs`):
+before the change **5 of 19** rideable lines re-took him after the pop
+(`platform-lip`, `ledge-long-e`, `ledge-long-w`, `dock-edge`, `back-coping`);
+after, **0 of 19**, every popped line `rearmed=true` on landing. The existing
+grind suite still holds **8/8** claims (`tools/grind-auto.mjs`), so no catch got
+weaker. `tsc` 0 · `vite build` clean (1,363.77 kB / 398.25 gzip, touch chunk
+still split). Boot smoke on the built bundle (960×540, software WebGL): menu at
+207 s, Start, pad A takes the rail to the pad face, the next keypress takes it
+back, no page errors. The physics half is model-measured —
+at 0.4 fps software WebGL the plaza cannot be ridden to a rail by hand, so the
+live pass proves boot and input, not the hop-off itself.
+
+**Hand-over:** this checkout has no `.genex` project (`npx genex preview` answers
+"No genex project here"), so there is no draft/world link to give from this
+sandbox; the build sits in `dist/`.
+
+### Milestone 19 — THE LEGEND SPEAKS PAD (2026-10-21)
+
+The pad was finally right and the screen was still wrong: the controls rail at
+the right edge printed the KEYBOARD's face (`PUSH V A S D`, `HOLD OLLIE SPACE`,
+`FLIP F G C`, `HOLD GRAB X`, `HOLD MANUAL SHIFT`) while the player was holding a
+controller. A legend that names the wrong device is the same class of mistake as
+a dead button.
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | a second row table — `A/X` push, `L-Stick` carve, `R-Stick up` ollie, `R-Stick diag` flip, `LT/RT` grab, `L-Stick down` slide-across, `R-Stick hold` manual, `LB/D-Pad` reset, `Start` pause — rendered from the same markup as the key rows | `ui/hud.ts` |
+| 2 | the rail follows the hand that moved last: the pad layer reports activity once per state change (8 steps per axis, any button), and a `keydown` takes the rail back | `skate/gamepad.ts`, `main.ts` |
+| 3 | a pad that is merely CONNECTED does not claim the rail — only one being used — so a keyboard player with a controller on the desk keeps the keycaps | `skate/gamepad.ts` |
+
+Verified live on the built bundle with the virtual standard pad (960×540,
+software WebGL): the rail read the keyboard's face untouched (`RIDE W A S D …
+PAUSE ESC`), switched to the pad's face on the first A press (`PUSH A X · CARVE
+L-STICK · OLLIE R-STICK UP · FLIP R-STICK DIAG · HOLD GRAB LT RT · HOLD SLIDE
+ACROSS L-STICK DOWN · HOLD MANUAL R-STICK HOLD · LOOK AROUND R-STICK · RESET LB
+D-PAD · PAUSE START`), and went back to the keycaps on the next keydown. No page
+errors. `tsc` 0 · `vite build` clean · touch chunk still split.
 
 ### Milestone 17 — THE LOADER SAID NOTHING (2026-10-20)
 

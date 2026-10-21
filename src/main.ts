@@ -1007,7 +1007,15 @@ async function boot(): Promise<void> {
     onPause: () => {
       if (!atTitle) setPaused(!paused);
     },
+    // The rail names the device the player is actually holding; a keydown takes
+    // it back (see the listener below).
+    onActivity: () => hud.setPadMode(true),
   });
+
+  // …and the keyboard claims the rail back the moment a key is pressed. The pad
+  // is polled every frame, so without this the rail would stay on pad labels
+  // after the player put the controller down and reached for WASD.
+  window.addEventListener("keydown", () => hud.setPadMode(false), { passive: true });
 
   // The animated backdrop is minutes behind the rest of the boot, so the menu
   // opens on the key art and upgrades itself in place when the loop lands.

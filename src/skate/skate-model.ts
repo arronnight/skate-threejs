@@ -902,6 +902,19 @@ export class SkateModel {
    * the pop that happens with the wheels on the floor.
    */
   private catchWhileRising = false;
+  /**
+   * The line he deliberately hopped off, while he is still in that air.
+   *
+   * `Grinder.cleared` re-arms the line he just left once he is 0.7 m above the
+   * spot — which is precisely where an ollie puts him. So the pop cleared the
+   * guard at the apex and the line took him back on the way down: measured with
+   * `tools/grind-hopoff.mjs`, 5 of 19 rideable lines (both long ledges, the
+   * platform lip, the dock edge, the back coping) re-caught him after a
+   * deliberate pop. A hop-off has to MEAN off: this id is refused until he
+   * lands, then forgotten, so the same line can take him again next time he
+   * rides onto it.
+   */
+  private hopOff: string | null = null;
   /** `flip` as it stood at the top of this frame — see `tryCatchGrind`. */
   private flipWas = 1;
   /** Squarest wall contact this frame — the share of the step that survived it. */
@@ -1033,6 +1046,7 @@ export class SkateModel {
     this.dropHold();
     this.pivoting = false;
     this.catchWhileRising = false;
+    this.hopOff = null;
     // Announced, not just cleared: R pressed halfway down a handrail otherwise
     // leaves the grind loop playing and the rider still yawed across a line
     // that is now on the other side of the plaza. Nothing is banked — a respawn
@@ -2464,6 +2478,8 @@ export class SkateModel {
    * after a spin is not the plane he is pointing in.
    */
   private land(yHint: number): void {
+    // The air the hop-off began is over: the line may take him again.
+    this.hopOff = null;
     const vh = Math.hypot(this.velX, this.velZ);
     const tx = vh > 1e-4 ? this.velX / vh : this.forwardX;
     const tz = vh > 1e-4 ? this.velZ / vh : this.forwardZ;
@@ -2756,6 +2772,10 @@ export class SkateModel {
     };
     const state = this.grind.catch(q, rails);
     if (!state) return false;
+    // A line he popped off on purpose cannot take him back out of that same
+    // air. Declined the way the gates below decline, leaving the Grinder holding
+    // a line nothing will ride; its next `catch()` retires it.
+    if (state.line.id === this.hopOff) return false;
     // THE SLIDE KEY, and it now gates ONE entry instead of all of them: the deck
     // dropped SQUARE across the line rather than ridden along it
     // (`Grinder.squareEntry`). Riding onto a line takes no key at all.
@@ -2926,8 +2946,10 @@ export class SkateModel {
     // over its length hands him that drop as vertical, exactly as a lip does.
     if (input.olliePressed) {
       const grade = railGrade(state);
+      const left = state.line.id;
       this.endGrind(false);
       this.pop("ollie", grade);
+      this.hopOff = left;
       // …and `catchWhileRising` is deliberately NOT set: this air began by
       // leaving a line on purpose, so `flight()` will not offer him one again
       // until he is on the way back down to it.
@@ -3170,6 +3192,8 @@ export class SkateModel {
     // there is no line, and `true` is what keeps it from paying for the grind
     // he just fell out of.
     this.endGrind(true);
+    // A bail ends the air the hop-off began in, same as a landing does.
+    this.hopOff = null;
     // The velocity he is actually carrying, which off a slam out of the air is
     // the flight velocity and not the heading he happens to have spun to.
     const air = this.state === "air";
