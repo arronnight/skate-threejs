@@ -67,6 +67,10 @@ export interface GamepadSink {
    * pump without ever being able to launch him.
    */
   padCrouch(down: boolean): void;
+  /** The session-marker jump — set the marker, then go back to it. */
+  padMarker(): void;
+  /** The right stick's up-then-down flick: the pop comes off the NOSE. */
+  padNollie(): void;
   /** Carve axis, −1 screen-LEFT … +1 screen-RIGHT. */
   padSteer(x: number): void;
 }
@@ -173,8 +177,33 @@ export class GamepadLayer {
   private rsX = 0;
   private rsY = 0;
   private rsT = 0;
-  /** The flick in progress: where it started and where the stick is now. */
-  private flick: { start: number; x: number; y: number } | null = null;
+  /**
+   * The flick in progress: where it started, where the stick is now, and the
+   * furthest UP it has been. The peak is what separates a nollie from a plain
+   * push-down: the nollie's load is the stick going up first, so a throw that
+   * never went up cannot be one.
+   */
+  /**
+   * The flick in progress. `up` is the furthest up the stick has been; `down`
+   * the furthest down. Both ends matter: DOWN is the load of an ollie, and a
+   * throw that ends UP is an ollie only if it was loaded down first — otherwise
+   * the up motion IS the nollie, which is the player's own sentence.
+   */
+  private flick: { start: number; x: number; y: number; up: number; down: number } | null = null;
+  /**
+   * The most recent time the stick was pulled fully DOWN, and how far.
+   *
+   * This has to live outside the flick session: a down-then-up throw can begin
+   * and end inside one poll at 30 fps, so the session that ends at the top may
+   * never have seen the bottom — and reading that as "no load" is what turned
+   * every fast ollie into a nollie. Cleared whenever a trick fires, so a nollie
+   * thrown a moment later cannot borrow the previous ollie's load.
+   */
+  private downAt = Number.NEGATIVE_INFINITY;
+  /** How far down the stick has been in the last `FLICK_MAX_MS`. */
+  private downPeak = 0;
+  /** When the stick last came to rest in the middle, 0 while it is not there. */
+  private neutralSince = 0;
   private lastFlick = Number.NEGATIVE_INFINITY;
   /** When the pull's release last popped him, so a flick cannot pop him twice. */
   private lastPop = Number.NEGATIVE_INFINITY;
@@ -189,6 +218,8 @@ export class GamepadLayer {
   private resetDown = false;
   /** The pad's crouch is down (see the poll's pump block). */
   private crouched = false;
+  /** Y: on/off the board, one press per push. */
+  private boardDown = false;
   /** No pad last poll — used to avoid re-releasing every frame. */
   private idle = true;
 
@@ -264,14 +295,15 @@ export class GamepadLayer {
   }
 
   /** The pop, and the flip behind it. A flick made in the air has no pop in it. */
-  private flicked(kind: Flick, now: number, grounded: boolean): void {
+  private flicked(kind: Flick, nollie: boolean, now: number, grounded: boolean): void {
     // THE FLICK IS THE ONLY POP. Nothing else on this pad loads Space — the
-    // crouch buttons set `padCrouch` and cannot launch him — so a flick up
-    // always taps the pop itself. `lastPop` stops a fast double throw from
+    // crouch buttons set `padCrouch` and cannot launch him — so a flick that
+    // ends up always taps the pop itself. `lastPop` stops a fast double throw from
     // buying two ollies. In the air the flick is only a flip: the board is
     // already up there.
     if (grounded && now - this.lastPop > POP_DOUBLE_MS) {
-      this.tap("Space");
+      if (nollie) this.sink.padNollie();
+      else this.tap("Space");
       this.lastPop = now;
     }
 
@@ -356,6 +388,24 @@ export class GamepadLayer {
     const dy = ry - this.rsY;
     const speed = Math.hypot(dx, dy) / dt;
     const rsMag = Math.hypot(rx, ry);
+    if (ry > 0.45) {
+      this.downPeak = Math.max(this.downPeak, ry);
+      this.downAt = now;
+    }
+    // A stick that has been RESTING in the middle for a moment has let go of
+    // whatever load it was holding: the next throw starts from neutral, so a
+    // restore-to-centre between two flicks makes the second one a fresh nollie
+    // instead of borrowing the last ollie's down. A fast down-then-up passes
+    // through the middle in a frame or two and keeps its load.
+    if (Math.abs(ry) < 0.2) {
+      if (this.neutralSince === 0) this.neutralSince = now;
+      else if (now - this.neutralSince > 120) {
+        this.downPeak = 0;
+        this.downAt = Number.NEGATIVE_INFINITY;
+      }
+    } else {
+      this.neutralSince = 0;
+    }
     this.rsX = rx;
     this.rsY = ry;
     this.rsT = now;
@@ -372,16 +422,45 @@ export class GamepadLayer {
       rsMag > FLICK_MAG &&
       speed > FLICK_SPEED
     ) {
-      this.flick = { start: now, x: rx, y: ry };
+      this.flick = { start: now, x: rx, y: ry, up: ry, down: ry };
     } else if (this.flick) {
       this.flick.x = rx;
       this.flick.y = ry;
+      this.flick.up = Math.min(this.flick.up, ry);
+      this.flick.down = Math.max(this.flick.down, ry);
       const spent = now - this.flick.start > FLICK_MAX_MS;
       if (speed < FLICK_SPEED * 0.5 || spent) {
-        const kind = readFlick(this.flick.x, this.flick.y);
+        // WHICH END OF THE DECK THIS POP COMES OFF.
+        //
+        // The player's sentence is the rule, and it has two halves that read
+        // like one: *"pushing up on the right analog starts a nollie and when
+        // you flick from up to down you do a nollie, the opposite of an
+        // ollie."* So:
+        //
+        //   down … up   the stick was LOADED off the tail — an ollie
+        //   up          no load first — the up motion IS the nollie
+        //   down        a push-down on its own — nothing, it is the load
+        //
+        // That is also why the down end never fires: it is the first half of an
+        // ollie, or the follow-through of a nollie that already popped at the
+        // top. Reading it the other way (nollie at the bottom, deflected by a
+        // one-frame park) is what the player could not get to work — the tail of
+        // a flick is not a separate gesture, it is the same flick.
+        const end = this.flick.y;
+        const loaded =
+          this.flick.down >= 0.45 ||
+          (this.downPeak >= 0.45 && now - this.downAt < FLICK_MAX_MS * 2);
+        const nollie = end < -0.45 && !loaded;
+        const kind = nollie
+          ? readFlick(-this.flick.x, end)
+          : end < -0.45
+            ? readFlick(this.flick.x, end)
+            : null;
         this.flick = null;
         this.lastFlick = now;
-        if (kind) this.flicked(kind, now, grounded);
+        this.downPeak = 0;
+        this.downAt = Number.NEGATIVE_INFINITY;
+        if (kind) this.flicked(kind, nollie, now, grounded);
       }
     }
 
@@ -432,11 +511,19 @@ export class GamepadLayer {
     this.hold("KeyW", push);
     this.hold("KeyS", pressed(pad, BTN.B));
 
-    // The session-marker jump — a marker button plus a D-pad direction — is the
-    // one thing on either control page that this game has: the reset. The two
-    // Skate books disagree on WHICH button opens the marker (3 puts the mode on
-    // LB, 2 puts the phone-and-marker on BACK), so both open it here. It is a
-    // press, not a hold, so it cannot machine-gun resets.
+    // Y — GET ON/OFF THE BOARD, exactly as the sheet has it. A press, not a
+    // hold: it is a mode toggle, and a held key would flip him in and out every
+    // frame. The ride ignores it mid-air and mid-grind.
+    const board = pressed(pad, BTN.Y);
+    if (board && !this.boardDown) this.tap("KeyY");
+    this.boardDown = board;
+
+    // The session-marker jump — a marker button plus a D-pad direction — is on
+    // both Skate control pages, and this game can honour it: the first press
+    // sets the marker where he stands, the next takes him back to it. The two
+    // books disagree on WHICH button opens the marker (3 puts the mode on LB, 2
+    // puts the phone-and-marker on BACK), so both open it here. A press, not a
+    // hold, so it cannot machine-gun the marker.
     const markerHeld = pressed(pad, BTN.LB) || pressed(pad, BTN.BACK);
     const marker =
       markerHeld &&
@@ -444,11 +531,12 @@ export class GamepadLayer {
         pressed(pad, BTN.DPAD_DOWN) ||
         pressed(pad, BTN.DPAD_LEFT) ||
         pressed(pad, BTN.DPAD_RIGHT));
-    if (marker && !this.resetDown) this.tap("KeyR");
+    if (marker && !this.resetDown) this.sink.padMarker();
     this.resetDown = marker;
   }
 
   dispose(): void {
+    this.boardDown = false;
     this.releaseAll();
   }
 }

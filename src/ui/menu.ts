@@ -436,6 +436,7 @@ const CSS = `
   .ctl-head { font-size: clamp(24px, 3.6vw, 34px); }
   .ctl-rows { gap: 1px clamp(14px, 2.4vw, 34px); }
   .ctl-rows span { line-height: 1.1; }
+  .ctl-note { line-height: 1.12; }
   .ctl-wrap .menu-btn { font-size: clamp(20px, 2.4vw, 28px); }
 }
 /* The button column is pinned to 52% for the title screen's stack; here it is
@@ -533,7 +534,7 @@ const BOARD_STYLE = BOARD_CSS;
 // font drawing ↑ at half the weight of the W beside it.
 const CONTROLS: [string, string][] = [
   ["V  W", "Push"],
-  ["A  D", "Carve · spin in the air"],
+  ["A  D  ·  ARROWS", "Carve · spin in the air · push and brake too"],
   ["S", "Brake · with A/D it scrubs a pivot, at any speed"],
   // One row, not two, as of the camera lane's 2026-07-29 change: the right
   // button is out of it entirely — looking around is plain mouse movement under
@@ -573,9 +574,9 @@ const CONTROLS: [string, string][] = [
   ["…ON THE RAIL", "A D fight the balance · square the deck · Space pops out"],
   ["ANY 180", "Ride away switch — landed or pivoted · another puts you back"],
   ["YOUR LINE", "Multiplies by DIFFERENT tricks · a repeat is one link"],
-  ["R", "Reset"],
+  ["Y  ·  PAD Y", "Step off the board and walk · again to get back on"],
+  ["R  ·  M", "Reset to the start · session marker"],
   ["ESC", "Pause"],
-  ["ARROW KEYS", "Push, carve and brake too"],
   // THE PAD IS A THIRD HAND, not a second layout: every row above still works
   // with one plugged in, which is why this is three lines and not a second
   // list. The sticks and the triggers cross the same input source as the
@@ -585,14 +586,14 @@ const CONTROLS: [string, string][] = [
   // These three rows are Skate 3's own control page, which is where the pad's
   // layout comes from — not the keyboard remapped: the left stick pumps, the
   // right stick IS the trick sheet, the triggers pump and grab, and the session
-  // marker button plus the D-pad is the reset. Y, RB, Back and the bare D-pad
-  // are on the sheet too and do nothing here, because this game has no off-board
-  // state, nothing to skitch, no replay editor and no hand gestures.
+  // marker button plus the D-pad is the reset, and Y is the off-board step. RB,
+  // Back and the bare D-pad are on the sheet too and do nothing here, because
+  // this game has nothing to skitch, no replay editor and no hand gestures.
   ["PAD · LEFT STICK", "Steer · UP pumps (crouch) · DOWN powerslides"],
-  ["…RIGHT STICK", "Flick UP = the only ollie · up-diagonals flip · sideways shove-it"],
+  ["…RIGHT STICK", "Flick UP = nollie · DOWN then UP = ollie · up-diagonals flip · sideways shove-it"],
   ["LT / RT", "Crouch/pump on the ground · grab in the air"],
   ["A / X  ·  B", "Push, right foot / left foot · brake"],
-  ["LB OR BACK + D-PAD", "Session-marker jump — the reset"],
+  ["LB OR BACK + D-PAD", "Session marker — set it, then go back to it"],
   ["START", "Pause"],
 ];
 
@@ -751,7 +752,7 @@ export class Menu {
           <div class="ctl-rows stagger" style="--i:1">
             ${CONTROLS.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join("")}
           </div>
-          <div class="ctl-note">Y, RB and the bare D-pad are on Skate's sheet — dismount, skitch, gestures — and there is none of that here</div>
+          <div class="ctl-note">RB and the bare D-pad are on Skate's sheet — skitch, gestures — and there is none of that here</div>
           <div class="menu-list">
             <button class="menu-btn stagger" style="--i:2" data-act="back">Back</button>
           </div>

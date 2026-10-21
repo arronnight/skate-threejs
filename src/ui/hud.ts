@@ -624,7 +624,7 @@ ${KEYCAP_CSS}
    their own score. And the corner score goes too, because the card IS that
    number finishing its sentence — two copies of one score fighting for the same
    eye is how a player ends up reading neither. */
-#hud.results-up #readout, #hud.results-up #controls, #hud.results-up #left {
+#hud.results-up #readout, #hud.results-up #left {
   opacity: 0; transition: opacity .3s ease;
 }
 /* THE LEFT RAIL — the overall score, and the speed under it.
@@ -803,45 +803,11 @@ ${KEYCAP_CSS}
 /* THE CONTROL RAIL — right edge, one row per skill: what it does, then the
    key it does it with, drawn as a keycap.
 
-   It replaces a legend that printed every binding in the game as two wrapped
-   rows spanning 56vw of the bottom of the screen — which is most of the play
-   area, and which is why it had to be hidden whenever the balance gauge came
-   up. This is a narrow column pinned to the right edge instead: it reads as a
-   list of skills rather than a paragraph of keys, it never crosses the centre,
-   and the trick line's own padding keeps clear of it.
-
-   The full manual is the menu's controls screen. This is the reminder. */
-#controls {
-  position: absolute; right: 3vw; bottom: 4.5vh;
-  display: grid; grid-template-columns: auto auto; align-items: center;
-  justify-items: end; column-gap: clamp(8px, 1vw, 16px); row-gap: clamp(3px, .6vh, 7px);
-  --cap: clamp(17px, 1.7vw, 22px);
-}
-#controls .s {
-  font-size: clamp(9px, 1.05vw, 12px); letter-spacing: .2em; font-weight: 700;
-  text-transform: uppercase; color: rgba(255,255,255,.86);
-  text-shadow: 1px 2px 0 rgba(0,0,0,.85);
-}
-/* HOLD is a property of the binding and not a second skill, so it rides in
-   front of the word at half the presence. The GRIND key is why the marker
-   exists at all, whichever key that currently is — E as of the second
-   2026-07-29 swap: it is the only binding in the game whose ABSENCE is
-   invisible. Every other one does nothing until you press it, and this one
-   silently decides whether a rail catches you, so a player who never learns it
-   rides over every ledge in the level and concludes the grinds are broken.
-   The key moves; the reason the marker is there does not, which is why this
-   comment no longer spells the letter out twice. */
-#controls .s em {
-  font-style: normal; opacity: .62; font-size: .88em; margin-right: .5em;
-}
-#controls .k { display: flex; gap: 3px; align-items: center; }
-/* Nothing anywhere else in the game is drawn as an object, so the caps carry
-   the whole "these are things you press" idea on their own — see KEYCAP_CSS. */
-@media (max-width: 699px) { #controls { display: none; } }
-/* A phone has no keyboard, and the game ships touch controls. A keycap legend
-   there is a picture of hardware the player is not holding — and it is exactly
-   the block that would eat a 390px screen. */
-@media (pointer: coarse) { #controls { display: none; } }
+/* THE CONTROL RAIL IS GONE. It was the keycap column pinned to the right edge,
+   and the player asked for it off the screen — the manual is the menu's
+   controls screen, and during a run the board, the line and the score are the
+   whole of what needs saying. Kept as a note rather than a selector so nobody
+   re-adds a legend here by copying an old file. */
 #centre {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 0.5em;
@@ -1015,18 +981,6 @@ const BANK_GRACE = 0.12;
  *     the gauge, and the gauge used to come up with nothing on screen naming
  *     the thing that saves it.
  */
-const CONTROL_ROWS: readonly (readonly [string, readonly string[], boolean])[] = [
-  ["Ride", ["W", "A", "S", "D"], false],
-  ["Ollie", ["Space"], true],
-  ["Flip", ["F", "G", "C"], false],
-  ["Grab", ["X"], true],
-  ["Slide across", ["E"], true],
-  ["Manual", ["Shift"], true],
-  ["Balance", ["A", "D"], false],
-  ["Look around", ["Mouse"], false],
-  ["Reset", ["R"], false],
-  ["Pause", ["Esc"], false],
-];
 
 /**
  * Held tricks that are announced but NOT badged — see `setHeld`.
@@ -1208,11 +1162,6 @@ export class Hud {
       <div id="balance">
         <div class="gauge">${"<i></i>".repeat(BALANCE_TICKS)}<div class="needle"></div></div>
       </div>
-      <div id="controls">${CONTROL_ROWS.map(
-        ([skill, keys, held]) =>
-          `<span class="s">${held ? "<em>Hold</em>" : ""}${esc(skill)}</span>` +
-          `<span class="k">${keys.map((k) => `<b class="keycap">${esc(k)}</b>`).join("")}</span>`,
-      ).join("")}</div>
       <div id="centre" class="stencil"></div>
       <div id="results" class="sk-screen sk-wash"></div>`;
     document.body.appendChild(this.root);

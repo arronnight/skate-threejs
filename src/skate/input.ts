@@ -51,6 +51,7 @@
 //   Shift (held) manual            Q (held) nose manual
 //   E (held)        SLIDE ACROSS — the deck laid sideways over a line. Riding
 //                   onto one needs no key at all.
+//   Y               get on/off the board
 //   R reset
 // (Escape pauses and the mouse looks around; neither is this file's — the boot
 // owns the pause key and the follow camera owns the pointer.)
@@ -108,6 +109,12 @@ export class SkateInputSource {
   private heelflipPressed = false;
   private shoveitPressed = false;
   private resetPressed = false;
+  /** M, or the pad's session-marker jump: one press, one marker step. */
+  private markerPressed = false;
+  /** The pad's right-stick flick came up off the nose: this pop is a nollie. */
+  private nolliePressed = false;
+  /** Y — on/off the board. One press, one step. */
+  private boardPressed = false;
   private steerSmoothed = 0;
   /**
    * A push during the wind-up calls the jump off. You cannot kick and pop off
@@ -198,6 +205,8 @@ export class SkateInputSource {
     if (code === "KeyG") this.heelflipPressed = true;
     if (code === "KeyC") this.shoveitPressed = true;
     if (code === "KeyR") this.resetPressed = true;
+    if (code === "KeyM") this.markerPressed = true;
+    if (code === "KeyY") this.boardPressed = true;
   }
 
   /**
@@ -246,6 +255,41 @@ export class SkateInputSource {
     const r = this.resetPressed;
     this.resetPressed = false;
     return r;
+  }
+
+  /**
+   * True once per press of M or the pad's marker jump. The ride decides what the
+   * step means — set it where he stands the first time, go back to it after —
+   * because only the ride knows whether a marker exists and whether he is on his
+   * feet. This is the same shape as `takeReset`, deliberately.
+   */
+  takeMarker(): boolean {
+    const m = this.markerPressed;
+    this.markerPressed = false;
+    return m;
+  }
+
+  /**
+   * The pad's NOLLIE pop — the right stick pushed up and then thrown down.
+   *
+   * It is Space, because a nollie is a pop: the same release, the same charge
+   * rule, the same `olliePressed` door into the ride. All the flag adds is which
+   * END of the deck came off the floor, which the ride cannot see from a key.
+   * Nothing on the keyboard sets it — a keyboard has one pop and no flick.
+   */
+  padNollie(): void {
+    this.press("Space");
+    this.release("Space");
+    this.nolliePressed = true;
+  }
+
+  /**
+   * The pad's session-marker jump (LB or Back + a D-pad direction). A method of
+   * its own rather than a `padControl` code because no thumb button carries it:
+   * `TouchControlCode` is the phone's vocabulary, and the phone has R.
+   */
+  padMarker(): void {
+    this.markerPressed = true;
   }
 
   // --- the touch layer's entry points ---------------------------------------
@@ -349,6 +393,7 @@ export class SkateInputSource {
   releaseAll(): void {
     this.held.clear();
     this.chargeSpent = false;
+    this.nolliePressed = false;
     this.throttleWas = false;
     this.windingWas = false;
     this.pushLocked = false;
@@ -436,6 +481,8 @@ export class SkateInputSource {
       chargeHeld: winding && !this.chargeSpent,
       crouchHeld: this.crouchHeld,
       olliePressed: this.olliePressed,
+      nolliePressed: this.nolliePressed,
+      boardPressed: this.boardPressed,
       kickflipPressed: this.kickflipPressed,
       heelflipPressed: this.heelflipPressed,
       shoveitPressed: this.shoveitPressed,
@@ -474,6 +521,8 @@ export class SkateInputSource {
       slideHeld: this.held.has("KeyE"),
     };
     this.olliePressed = false;
+    this.nolliePressed = false;
+    this.boardPressed = false;
     this.kickflipPressed = false;
     this.heelflipPressed = false;
     this.shoveitPressed = false;
@@ -492,6 +541,11 @@ const HANDLED = new Set([
   "KeyG",
   "KeyQ",
   "KeyR",
+  // M — the session marker. Not a browser default, but the set is every key the
+  // ride reads, and the pad's marker jump reaches the same latch.
+  "KeyM",
+  // Y — on/off the board. The pad's Y reaches the same latch.
+  "KeyY",
   "KeyV",
   "KeyX",
   "Space",

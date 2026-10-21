@@ -364,7 +364,8 @@ section(
   "90° and 65°, lead swept over the whole arc",
   acrossCells([90, -90, 65, -65]),
   {
-    claim: "hopping OVER a line to get past it takes no line — unless he asks with E",
+    claim:
+      "hopping OVER a line takes no line unless he asks with E — every line, raised or flush",
     ok: (c) => c.up.bad === 0 && c.held.bad > 0,
     broke:
       "src/skate/skate-model.ts — the square gate deleted (`if (this.grind.squareEntry && " +

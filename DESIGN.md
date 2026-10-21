@@ -24,17 +24,123 @@ Key art: `cms2hv48901lw22lppfy2tr8c` (street, golden hour, UI-free).
   by:** R, instant reset, same block
 
 ## Build plan & status
-Now: **18. THE PAD IS SKATE'S PAD (2026-10-20)** — working mode: **focused
-change**. After milestone 16 the player plugged in a pad and said *"that is not
-skate 3s controls"*, then handed over the control page itself. He was right, and
-the page says more than the right stick: LT/RT are **Pump/Grab**, LS up **pumps**
-and LS down **powerslides**, push is **A/X**, brake is **B**, the session marker
-is **LB + D-pad**, and Y / RB / Back / the bare D-pad are all *other* features
-this game does not have. The pad now follows that page button for button; the
-flick-it engine from the first pass stays. Milestone 16's polling, dead zones,
-edge handling and its one measured bug fix (the staleness gate) stay; its mapping
-does not. Milestone 12's rows still marked ⏳/❌/⚠️ have NOT been absorbed here
-and are still owed.
+Now: **20. THE PLAYER'S FOUR (2026-10-21)** — working mode: **focused
+change**. The player asked for four things in one message: take the controls
+legend off the gameplay screen, be able to pop in and out of grinds, get off the
+board and walk around and get back on, and a **nollie** — *"pushing up on the
+right analog starts a nollie and when you flick from up to down you do a nollie,
+the opposite of an ollie … all the same types of tricks but nollie."* All four
+are in. **Correction, same day, on the player's answer:** the first nollie read
+the DOWN end of the throw and it did not work for him (*"what about my nollies"*),
+and popping out of a grind re-locked the same line (*"grinds are sticking"*).
+Both are fixed under 20's rows 2, 3 and 8b; the nollie is now the UP throw
+itself and a popped-out line is refused until he lands. 19 stands as recorded;
+12's ⏳/❌/⚠️ rows are still owed.
+
+### Milestone 20 — OFF THE BOARD, INTO A GRIND, AND THE NOLLIE (2026-10-21)
+
+**Source:** the player, one message, four asks. Each is treated as a separate
+row so a later round can see which half of the sentence moved.
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | the gameplay **controls legend is gone** — `#controls`, `CONTROL_ROWS` and the keycap rail deleted from the HUD; the controls screen is the only place bindings are printed now | `ui/hud.ts` |
+| 2 | **nollie**: the right stick **up** is the nollie — no load needed — and a throw that was loaded off the tail first (down, then up) is the ollie. Every flip and shove-it has a nollie form from the mirrored table (`readFlick(-x, up)`), the display name is `Nollie` / `Nollie Kickflip`, and the deck pitches the other way | `skate/gamepad.ts`, `skate/input.ts`, `skate/skate-model.ts` |
+| 3 | the load survives a fast crossing of the middle but not a rest there (120 ms neutral dwell clears it), so two flicks in a row cannot borrow each other's direction — and the up-throw's own pop is the nollie, with the down that may follow it treated as follow-through, not a second gesture | `skate/gamepad.ts` |
+| 4 | **Y (and pad Y) steps off the board** where he stands — half a metre to his right, refused mid-air — and Y again steps back on within 2.5 m, on the deck, down the same heading and stance | `skate/skate-model.ts`, `skate/input.ts`, `skate/gamepad.ts` |
+| 5 | walking is its own branch, not a `SkateState`: push/carve/brake move him at ~2.3 m/s with the same sign convention as riding, on the surface, against walls; no trick, pump, grind or pop can fire from it | `skate/skate-model.ts` |
+| 6 | the deck is **parked**: the ridden deck is hidden and a copy of whatever deck is loaded is stood on the ground where he left it, lifted by its own lowest point so the wheels touch; removed again on remount | `skate/skater-rig.ts` |
+| 7 | the walk itself is the rig's — a lean, a step bob and a shoulder sway at the cadence the speed asks for — because there is no walk clip in the character's take set and nothing to generate one with | `skate/skater-rig.ts` |
+| 8 | **pop in and out of grinds**: a pop off a line may take the same line again on the way up (`GrindQuery.popped`), without being asked twice | `skate/grind.ts`, `skate/skate-model.ts` |
+| 8b | **…and popping OUT now leaves**: the line he popped out of is refused for the rest of that air ("_grinds are sticking and not popping off_" — the flat bar at 6 m/s re-locked 47 frames after the pop, 3 of 3 approaches); any OTHER line can still take him, and landing back on the same one after a beat is allowed | `skate/skate-model.ts` |
+| 9 | the square-across question stays the player's: **E** is still the only way to lay the deck across a line from the ground — a handrail he popped clean over must stay over. The raised-line auto-catch tried this round was reverted (see Decisions) | `skate/skate-model.ts` |
+| 10 | controls screen: `Y · PAD Y` row, nollie on the right-stick row, arrows folded into `A D · ARROWS` so the page still fits 720 px; the stale "dismount does nothing here" note corrected | `ui/menu.ts` |
+| 11 | phone: a small **BOARD** button in the touch cluster, above GRAB | `controllers/touch/skate-touch-layer.ts`, `ui/touch-controls.ts` |
+
+**Verified.**
+- `tools/flick-check.mjs` (new) — 9/9 on the pad layer with a real clock:
+  **down→up is an ollie** (one `Space`), **up alone is a nollie** (one
+  `padNollie`, no `Space`), **up→down is one nollie** (no second pop), **a plain
+  down push pops nothing**, and up-left / up-right name the nollie's kickflip
+  and heelflip.
+- `tools/grind-exit.mjs` (new) — 3/3 over 16 rides on four lines at 6 and
+  10 m/s: every catch could pop out, **16/16 landed rolling and none re-took
+  the line it left** (was 3/3 re-locks on the flat bar at 6 m/s), all inside
+  the air.
+- `tools/nollie-check.mjs` (new) — 7/7 over the real model: a nollie pops to
+  the same air as an ollie (0.859 s both), is named `Nollie`, pitches the nose
+  up where the ollie pitches it down (+0.04 vs −0.04), takes Kickflip, Heelflip
+  and Shove-it as `Nollie …`, and is gone by the next air.
+- `tools/walk-check.mjs` (new) — 13/13: Y steps him off with the deck left at
+  the exact point, he walks 2.49 m in 1.2 s, no pop while walking, Y out of
+  reach does not mount, walking back within reach does, and the ride is live
+  again on the same heading; Y mid-air is refused.
+- `tools/park-check.mjs` (new) — 9/9 through the real `SkaterRig` in a scene:
+  the parked deck's lowest point is 0.000 m off the floor, 0.000 m from the
+  park point, 0.60 m from him, the ridden deck hidden while it is; remount
+  removes the copy and draws the ridden deck again.
+- Pad flick layer, stubbed standard pad + controlled clock: **down→up taps
+  `Space` once and never a nollie**; **up→down raises exactly one `padNollie`
+  and does not also tap `Space`**; **a plain down push raises neither**.
+- Live, built bundle, 640×360, after the correction: off the board with Y and
+  back on with Y, no page errors, the HUD still has no `#controls`, and the
+  controls page lists the new `…RIGHT STICK` wording — capture `80-smoke`.
+- Live, built bundle, software WebGL: the 1280×720 HUD shows no legend and
+  `#controls` is absent from the DOM; Y leaves him walking with the deck
+  standing beside him, low camera; phone-size capture shows the BOARD button
+  and the parked deck; no page errors.
+- `tsc` 0; `vite build` clean and the touch chunk still split; baselines
+  unchanged — `integration-check` 69/75, `input-matrix` 16/17, `grind-auto` 7/8.
+
+**Decisions.**
+- **Square across needs E, on every line.** Raising the auto-catch for proud
+  lines was tried first (a handrail he popped toward would take him), and it
+  bought the "pop in" half at the price of the ollie: `input-matrix` measured
+  every handrail cleared from the ground snapping him onto it. The player's
+  sentence is about popping in and out of a grind he is already in, which the
+  rising re-catch covers; a deliberate hop is left alone.
+- **Up is the nollie, not the end of an ollie.** The first reading — up loads a
+  nollie, down finishes it — was implemented and the player still could not get
+  one: the tail of a flick is the same flick, not a second gesture. The up now
+  pops the nollie outright, and the ollie is the throw loaded off the tail
+  first, which is both what the player wrote and what the sheet's "opposite of
+  an ollie" means.
+- **The walk is procedural.** There is no walk clip and `genex` is unavailable
+  here, so the alternative was no walking at all. Recorded as a limitation, not
+  a choice of style.
+- **One frame of ollie latency** is the price of nollie detection; at a pad's
+  real poll rate it is under a frame of the render.
+
+### Milestone 19 — THE SESSION MARKER (2026-10-21)
+
+**Source:** the same Skate control page as 18 — `Session marker mode LB` + D-pad
+on the 3 sheet, `BACK` on the 2 sheet. Both open it here. The marker is a
+**place**, not a mode: no marker screen, no D-pad menu, no caption (the player
+asked for no captions anywhere).
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | `reset()`'s body lifted into `respawnAt({x,y,z,heading,stance})`; `reset()` is now the spawn's call to it, so every teleport — R, map swap, restart, menu — is the same rules | `skate/skate-model.ts` |
+| 2 | `markerPressed` latch, `takeMarker()`, `padMarker()`, and **M** on the keyboard; `KeyM` joins the handled set | `skate/input.ts` |
+| 3 | LB/Back + D-pad now raises `padMarker()` instead of tapping `KeyR` — the marker is its own intent, not a second reset key | `skate/gamepad.ts` |
+| 4 | one latch, two halves: no marker → plant it where he stands (refused mid-air, because a marker is somewhere he can stand); marker → `respawnAt`, clear the centre card, end the line | `main.ts` |
+| 5 | the ring: a thin chalk-yellow disc on the ground, pulsing slowly, cleared when the map is unmounted (a marker is a place on a map that no longer exists) | `main.ts` |
+| 6 | HUD legend gains **MARKER M**; the controls screen's row reads *"Session marker — set it, then go back to it"* | `ui/hud.ts`, `ui/menu.ts` |
+
+**Verified.**
+- `tools/marker-check.mjs` (new, headless over the real street spot) — 6/6: he
+  rode 10.4 m away and returned to `0.0e+0` m of the point **at the same
+  heading**, standing still on the floor; a switch marker puts him back switch
+  and fires `onStance`; a marker return lands him out of the air with speed 0;
+  `airborne` is true off a pop, which is the rule that refuses a mid-air plant.
+- Pad layer, stubbed standard pad + controlled clock: LB+right and Back+up raise
+  exactly **one** marker per push (a held combination stays one), Back alone
+  raises none, and **no `KeyR` is tapped** any more.
+- Live, built bundle, 640×360 software WebGL, virtual pad only: the ring is
+  clearly visible under him after LB+right; four push pulses took him to
+  14 km/h and away; **Back + D-pad up brought him back onto the ring at
+  0 km/h** — captures `40-before/41-after` and `50-away/51-return`.
+- `tsc` 0, `vite build` clean, touch chunk still split.
 
 ### Milestone 18 — THE PAD IS SKATE'S PAD (2026-10-20)
 

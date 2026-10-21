@@ -381,6 +381,21 @@ export interface GrindQuery {
    * ollie onto an edge. Absent reads as a landing, which is the generous case.
    */
   grounded?: boolean;
+  /**
+   * True when this air began with a POP off the floor rather than by leaving a
+   * surface under its own power.
+   *
+   * It buys exactly one thing: a CROSSING may catch while the board is still
+   * RISING. Everything else about a pop is already the ordinary landing rules,
+   * but a pop onto a rail is the ordinary way anyone gets on one — you ollie
+   * beside it and the board reaches the bar's height on the way up. The refusal
+   * of rising crossings below exists for the quarter pipe: launching off a
+   * coping is RISING across the coping's own line on the frame the air is
+   * created, and locking that on is a coping slide instead of an air. A launch
+   * is not a decision, a pop is, and the ride is the only thing that knows
+   * which one it just did.
+   */
+  popped?: boolean;
 }
 
 /**
@@ -785,7 +800,7 @@ export class Grinder {
       // below, is the single most ordinary thing anyone does on a quarter pipe
       // — 28 of 70 approaches used to come back as a coping slide instead of an
       // air — so a deck put across a line has to be on its way down onto it.
-      if (crossing && rising) continue;
+      if (crossing && rising && !q.popped) continue;
       // Was the board inside this line's vertical window WHILE it was over the
       // line? Height sweeps linearly along the step, so the piece of it spent
       // in the corridor is one comparison — and it has to be a piece of the

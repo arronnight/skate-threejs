@@ -17,7 +17,7 @@ import { createGltfLoader } from "./controllers/quality/gltf-loader";
 import { createSkateCamera } from "./camera/skate-camera";
 import { getMap, maps, mount, type MapId, type MountedMap } from "./world/maps";
 import { SkateModel, EMPTY_INPUT } from "./skate/skate-model";
-import type { TrickName } from "./skate/skate-model";
+import type { RespawnPoint, TrickName } from "./skate/skate-model";
 import type { GrindKind, Stance, TrickId } from "./skate/contracts";
 import type { GrindLine } from "./world/surface";
 import { SkateInputSource } from "./skate/input";
@@ -344,6 +344,26 @@ async function boot(): Promise<void> {
   const audio = new GameAudio(tier);
   const rig = new SkaterRig(scene);
 
+  // THE SESSION MARKER'S ONLY VOICE. The player asked for no captions anywhere,
+  // so the marker is a ring on the ground rather than a line of text: thigh-high
+  // and thin enough to read as chalk, and it pulses just enough to be seen
+  // against concrete at speed. It holds the point, not a mode — the ride decides
+  // set-vs-return, because only the ride knows whether one exists.
+  const markerRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 0.68, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd23d,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  markerRing.rotation.x = -Math.PI / 2;
+  markerRing.visible = false;
+  scene.add(markerRing);
+  let marker: RespawnPoint | null = null;
+
   let paused = false;
   let anim: SkaterAnim | null = null;
   let ragdoll: Ragdoll | null = null;
@@ -377,7 +397,7 @@ async function boot(): Promise<void> {
       // the body itself thumps. The combo SURVIVES, deliberately; the concrete
       // already took its cut out of his roll speed and taxing him twice for
       // landing big is the rule we just removed wearing another hat.
-      onLand: (_trick: TrickName | null, streak: number, slam = 0) => {
+      onLand: (_trick: string | null, streak: number, slam = 0) => {
         audio.play("land", Math.min(1, 0.8 + slam * 0.05));
         anim?.playCushion(slam); // take the landing on bent knees
         if (slam > 0) audio.bodyImpact(slam);
@@ -825,6 +845,9 @@ async function boot(): Promise<void> {
     ragdoll?.release();
     skate.reset();
     hud.resetRun();
+    // A marker is a place on the map that just got unmounted.
+    marker = null;
+    markerRing.visible = false;
     // The tuning panel holds a reference to the light rig, and the line above
     // just replaced it. Without this its sun sliders would keep driving the
     // OLD map's sun — a light that is no longer in the scene.
@@ -1192,6 +1215,7 @@ async function boot(): Promise<void> {
       // input does.
       const talking = dialogueOpen();
       const resetAsked = input.takeReset();
+      const markerAsked = input.takeMarker();
       if (resetAsked && !talking) {
         // Hand the bones back before the model teleports — R mid-fall must not
         // leave physics holding a skeleton that is suddenly on the other side
@@ -1200,6 +1224,32 @@ async function boot(): Promise<void> {
         skate.reset();
         hud.hideCentre();
         hud.resetRun();
+      }
+      // ONE KEY, TWO HALVES OF THE SHEET'S MARKER ROW: the first press plants
+      // the marker under his feet, the next takes him back to it. Placing one in
+      // the air is refused rather than stored, because a marker is somewhere he
+      // can stand. Coming back is `reset`'s teleport with his own heading and
+      // stance, so the line he was about to ride is still the line.
+      if (markerAsked && !talking) {
+        const planted = marker;
+        if (!planted) {
+          if (!skate.airborne) {
+            marker = {
+              x: skate.position.x,
+              y: skate.position.y,
+              z: skate.position.z,
+              heading: skate.heading,
+              stance: skate.stance,
+            };
+            markerRing.position.set(marker.x, marker.y + 0.04, marker.z);
+            markerRing.visible = true;
+          }
+        } else {
+          ragdoll?.release();
+          skate.respawnAt(planted);
+          hud.hideCentre();
+          hud.resetRun();
+        }
       }
       const live = input.consume(delta);
       const intent = talking ? EMPTY_INPUT : live;
@@ -1287,6 +1337,11 @@ async function boot(): Promise<void> {
         else if (runPhaseWas === "running") audio.runEnd();
         runPhaseWas = runPhase;
       }
+    }
+
+    if (markerRing.visible) {
+      (markerRing.material as THREE.MeshBasicMaterial).opacity =
+        0.34 + 0.22 * Math.sin(now * 0.003);
     }
 
     followCam.update(skate, delta, !paused);

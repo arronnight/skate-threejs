@@ -183,6 +183,14 @@ export class SkaterRig {
   private ankleRest = -1;
   /** 0 = wheels down, 1 = fully airborne. */
   private airBlend = 0;
+  /** Steps taken on foot, in radians of gait — see the walk branch in `followFeet`. */
+  private walkClock = 0;
+  /** The deck, left standing where he stepped off it. Null while he rides. */
+  private parked: THREE.Object3D | null = null;
+  /** How far to lift the parked deck so its lowest point sits on the floor. */
+  private parkLift = 0;
+  /** The scene the parked deck is added to. */
+  private readonly scene: THREE.Scene;
   private charTarget = new THREE.Vector3();
   /**
    * Where the feet want him, before the push lean-cancel is laid on top. Kept
@@ -192,6 +200,7 @@ export class SkaterRig {
   private charBase = new THREE.Vector3();
 
   constructor(scene: THREE.Scene) {
+    this.scene = scene;
     this.root.add(this.tilt);
     this.tilt.add(this.grindYaw);
     this.grindYaw.add(this.bank);
@@ -409,6 +418,52 @@ export class SkaterRig {
     this.grindYaw.rotation.y = skate.grindState
       ? skate.grind.boardHeading(skate.grindState) - skate.heading
       : THREE.MathUtils.damp(this.grindYaw.rotation.y, 0, GRIND_UNWIND, dt);
+
+    this.updateParked(skate);
+  }
+
+  /**
+   * The deck he is not standing on. While he rides it, this does nothing.
+   *
+   * Stepping off HIDES the ridden deck (`boardFlip`) and puts a COPY of it on
+   * the ground where he left it — a copy rather than the original because the
+   * original still has to be the one under his feet the instant he steps back
+   * on, at the exact rake and roll the rig has been maintaining for it. The copy
+   * is built once, from whatever deck is loaded, and moved from park to park.
+   */
+  private updateParked(skate: SkateModel): void {
+    const park = skate.boardPark;
+    if (!park) {
+      this.boardFlip.visible = true;
+      this.stand.visible = true;
+      if (this.parked) {
+        this.scene.remove(this.parked);
+        this.parked = null;
+      }
+      return;
+    }
+    this.boardFlip.visible = false;
+    if (!this.parked) {
+      const source = this.boardFlip.children[0];
+      if (!source) return;
+      const parked = source.clone(true) as THREE.Object3D;
+      parked.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.castShadow = true;
+          mesh.receiveShadow = false;
+        }
+      });
+      // Its own lowest point, not the ridden node's offset: a generated deck is
+      // not the placeholder and the two do not sit the same distance under the
+      // origin. Measured once, here, so the wheels touch whatever the floor is.
+      const box = new THREE.Box3().setFromObject(parked);
+      this.parkLift = -box.min.y;
+      this.parked = parked;
+      this.scene.add(parked);
+    }
+    this.parked.position.set(park.x, park.y + this.parkLift, park.z);
+    this.parked.rotation.y = park.heading;
   }
 
   /**
@@ -434,6 +489,31 @@ export class SkaterRig {
    */
   followFeet(anim: SkaterAnim | null, skate: SkateModel, dt: number, bonesHeld = false): void {
     if (anim) this.rider = anim;
+    // -----------------------------------------------------------------------
+    // ON FOOT. There is no walk clip in the character's take set — the motion
+    // search had none and the neighbourhood was not one to invent one in — so
+    // the gait is the rig's, the way the push already is: a lean into the walk,
+    // a step bob at the cadence the speed asks for, and a shoulder sway on the
+    // opposite beat. He stands at ground level (the deck is parked behind him,
+    // see `updateParked`), so nothing about his soles is being solved here.
+    // -----------------------------------------------------------------------
+    if (skate.walking) {
+      this.airBlend = 0;
+      this.walkClock += dt * (2.2 + Math.abs(skate.speed) * 2.4);
+      const moving = Math.min(1, Math.abs(skate.speed) / 1.6);
+      this.stand.rotation.x = 0.05 * moving;
+      this.stand.rotation.z = Math.sin(this.walkClock * 3.4) * 0.04 * moving;
+      this.character.position.set(
+        0,
+        Math.abs(Math.sin(this.walkClock * 1.7)) * 0.045 * moving,
+        0,
+      );
+      this.charBase.copy(this.character.position);
+      this.boardPitch.position.set(0, AXLE_HEIGHT, 0);
+      this.boardPitch.rotation.x = 0;
+      return;
+    }
+    this.stand.rotation.z = 0;
     const bailing = skate.state === "ragdoll" || bonesHeld;
     const air = skate.airborne ? 1 : 0;
     // Coming down snaps back faster than going up: the wheels have to be on

@@ -227,6 +227,10 @@ const RIDE_CLUSTER: readonly ButtonSpec[] = [
     right: 112,
     bottom: 112,
   },
+  // GET OFF / GET BACK ON. Rare next to a trick, so it is the smallest cap and
+  // sits out of the thumb's path: a tap, and the ride decides which half of the
+  // step it is from where he is standing.
+  { label: "BOARD", code: "KeyY", hold: false, hit: 64, cap: 48, font: 9, right: 20, bottom: 202 },
 ];
 
 /**

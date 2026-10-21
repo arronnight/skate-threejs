@@ -580,6 +580,34 @@ const RAGDOLL_DRAG = 9;
 
 export type SkateState = "rolling" | "air" | "grind" | "ragdoll";
 
+/**
+ * What the readout calls a trick. Every id in the book has its own name, and a
+ * nollie is that name with a word in front — so the display name is a string
+ * rather than the closed `TrickName` union. `trickId` is still the union: the
+ * score, the clip and the animation all come off the trick itself.
+ */
+export type TrickDisplay = string;
+
+/**
+ * What a nollie is called. "Nollie" for the plain pop, "Nollie Kickflip" for
+ * every trick that can follow it — the same list, because the flick after the
+ * pop is the same flick. The picker is on the string rather than a second
+ * `TrickName` because the scoring book, the clips and the gauge are all the
+ * trick's own; only the readout changes.
+ */
+function nollieName(name: string): string {
+  return name === "Ollie" ? "Nollie" : `Nollie ${name}`;
+}
+
+/** Where a respawn puts him — the start, or a session marker. */
+export interface RespawnPoint {
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  stance: Stance;
+}
+
 export interface SkateInput {
   throttle: boolean;
   brake: boolean;
@@ -596,6 +624,23 @@ export interface SkateInput {
   crouchHeld?: boolean;
   /** Jump key just let go: the pop. On a rail it is the pop OUT. */
   olliePressed: boolean;
+  /**
+   * Y, pressed once: step off the board, or back onto it.
+   *
+   * Skate's sheet puts "get on/off board" on Y, and the player asked for the
+   * walking half of it in as many words: *"I need a way to get off the board and
+   * get back on so I can just walk around."* It is an EDGE — one press, one
+   * step — because it is a mode and a held key would toggle it every frame.
+   */
+  boardPressed?: boolean;
+  /**
+   * This pop is a NOLLIE — off the nose, with the front foot, the mirror of an
+   * ollie. The pad's right-stick flick raises it (up, then down); nothing on the
+   * keyboard does, because Space is a single pop and the keyboard has no flick.
+   * It is a property of the POP and not a mode: the board is coming off the nose
+   * on this frame, and from there the trick is the trick.
+   */
+  nolliePressed?: boolean;
   kickflipPressed: boolean;
   // Milestone 7's new keys. Optional so the input lane can land them on its own
   // clock without the ride waiting on it; an absent flag reads as not pressed.
@@ -657,7 +702,7 @@ export interface SkateEvents {
    * cushion how deep to bend and an impact sound how hard to hit, now that
    * coming down heavy costs speed instead of costing the run.
    */
-  onLand?: (trick: TrickName | null, streak: number, slam?: number) => void;
+  onLand?: (trick: TrickDisplay | null, streak: number, slam?: number) => void;
   /**
    * A line ended on the FLOOR — a manual let go of with the wheels never having
    * left it. It is the one way a combo closes that no landing is going to
@@ -671,11 +716,13 @@ export interface SkateEvents {
    * The run ended badly. Kept from milestone 4 so the existing audio and HUD
    * routing still fires; `onRagdoll` is the one that carries the physics.
    */
-  onBail?: (trick: TrickName | null) => void;
+  onBail?: (trick: TrickDisplay | null) => void;
   /** The board locked onto a line. */
   onGrindStart?: (kind: GrindKind, line: GrindLine) => void;
   /** …and left it, either popped out / ran off (false) or lost it (true). */
   onGrindEnd?: (bailed: boolean) => void;
+  /** On the board (true) or walking beside it (false). */
+  onBoard?: (riding: boolean) => void;
   /** A spin resolved on landing (or when a ground pivot ended). Signed degrees. */
   onSpin?: (landedDegrees: number) => void;
   /** He is riding the other way round now — every mirrored clip keys off this. */
@@ -815,7 +862,7 @@ export class SkateModel {
   flipSign: 1 | -1 = -1;
 
   /** The trick currently in the air, if any — display name, for the clip layer. */
-  trick: TrickName | null = null;
+  trick: TrickDisplay | null = null;
   /** …and its id, for the score and the trick table. */
   trickId: TrickId | null = null;
   /** Consecutive clean landings. */
@@ -902,6 +949,21 @@ export class SkateModel {
    * the pop that happens with the wheels on the floor.
    */
   private catchWhileRising = false;
+  /**
+   * The line he just popped out of, and how long it must not take him again.
+   *
+   * Popping straight up off a LOW line lands you back on it, and this game's
+   * pop is mostly vertical: measured on the flat bar at 6 m/s, he re-locked on
+   * 47 frames after leaving it, three approaches out of three. From the
+   * player's seat that is a grind that will not let go — *"grinds are sticking
+   * and not popping off"* — so a line he left ON PURPOSE is off his menu until
+   * the air that left it is over. `flight()` still lets him take any OTHER
+   * line, and landing back on the same one after a beat is a thing he can do.
+   */
+  private noRecatchId: string | null = null;
+  private noRecatchT = 0;
+  /** This air was popped off the NOSE — a nollie. Cleared by every take-off. */
+  private nollie = false;
   /** `flip` as it stood at the top of this frame — see `tryCatchGrind`. */
   private flipWas = 1;
   /** Squarest wall contact this frame — the share of the step that survived it. */
@@ -999,22 +1061,42 @@ export class SkateModel {
   }
 
   reset(): void {
+    const start = this.surface.spawn();
+    this.respawnAt({
+      x: start.x,
+      y: this.surface.height(start.x, start.z),
+      z: start.z,
+      heading: start.heading,
+      stance: "regular",
+    });
+  }
+
+  /**
+   * Put him back on his feet at a point of the player's choosing — the session
+   * marker's half of `reset`, and exactly the same teleport.
+   *
+   * The marker is a place, not a mode: it carries the heading and the stance he
+   * had when he set it, so returning to it puts him back on the same foot facing
+   * the same way down the same line. Every other rule is `reset`'s, which is the
+   * point — a marker return must not leave an unbanked combo, a grind loop or a
+   * ragdoll holding state across the jump.
+   */
+  respawnAt(point: RespawnPoint): void {
     // R is a TELEPORT, and the fall's two exits are both journeys home — the
     // get-up blends the skeleton back, the deck slides to his feet over
     // `BOARD_RETURN`. Both solve against a home that is about to be somewhere
     // else entirely, so without this the board streaks in from wherever he
     // bailed for half a second after the respawn. `cancel` skips the journeys.
     this.body?.cancel();
-    const start = this.surface.spawn();
-    this.position.set(start.x, this.surface.height(start.x, start.z), start.z);
-    this.heading = start.heading;
+    this.position.set(point.x, point.y, point.z);
+    this.heading = point.heading;
     this.speed = 0;
     this.vy = 0;
     this.velX = 0;
     this.velZ = 0;
     this.state = "rolling";
     this.rollingBackwards = false;
-    this.faceHeading = start.heading;
+    this.faceHeading = point.heading;
     this.lean = 0;
     this.boardPitch = 0;
     this.flip = 1;
@@ -1051,7 +1133,7 @@ export class SkateModel {
     this.wallAlong = -1;
     this.wallOver = 0;
     this.onWall = false;
-    this.setStance("regular");
+    this.setStance(point.stance);
     this.setCharging(false);
   }
 
@@ -1060,6 +1142,14 @@ export class SkateModel {
     // the step — `tryCatchGrind` runs out of `roll()` and out of `flight()`,
     // neither of which is handed the frame's input. See `SkateInput.slideHeld`.
     this.slideWanted = input.slideHeld === true;
+    if (this.noRecatchT > 0) this.noRecatchT = Math.max(0, this.noRecatchT - dt);
+    // ON FOOT, or stepping on/off. Asked before every trick branch so a Y press
+    // that lands on the same frame as a pop cannot do both.
+    if (input.boardPressed === true) this.toggleBoard();
+    if (this.onFoot) {
+      this.updateOnFoot(input, dt);
+      return;
+    }
     if (this.state === "ragdoll") {
       this.updateRagdoll(dt);
       this.settleWall(dt);
@@ -1295,7 +1385,7 @@ export class SkateModel {
     if (fired && grounded) {
       // Popping off a transition takes the transition with you: the legs add
       // their impulse to the velocity the surface already had you carrying.
-      this.pop(fired, grade);
+      this.pop(fired, grade, input.nolliePressed === true);
       // The one air that may still be offered a line while it is RISING: he
       // jumped, off the floor, on purpose, and an ollie onto a handrail is
       // exactly that. Set after the pop, which clears it.
@@ -1304,7 +1394,7 @@ export class SkateModel {
       // Late flick: turn an ollie already in the air into a flip. Riskier —
       // there is less hang time left for the board to come round.
       this.trickId = fired;
-      this.trick = this.tricks.def(fired).name;
+      this.trick = this.nollie ? nollieName(this.tricks.def(fired).name) : this.tricks.def(fired).name;
       this.setFlip(fired);
     }
 
@@ -2299,8 +2389,10 @@ export class SkateModel {
     // end of it — see `advance`.
     this.advance(this.velX * dt, this.velZ * dt, yStep, this.position.y);
 
-    // Nose lifts off the pop, then levels out for the landing.
-    const target = this.vy > 0 ? -0.34 : 0.06;
+    // Nose lifts off the pop, then levels out for the landing. A NOLLIE lifts the
+    // other end — the tail comes up as the nose leaves the floor, so the deck
+    // pitches the mirror of an ollie and lands the same way flat.
+    const target = this.vy > 0 ? (this.nollie ? 0.34 : -0.34) : 0.06;
     this.boardPitch = THREE.MathUtils.damp(this.boardPitch, target, 7, dt);
 
     // Kept so a rail can ask about `flip` at the moment the trucks met the line
@@ -2412,24 +2504,32 @@ export class SkateModel {
     this.vy = launch - rising + Math.sqrt(rising * rising + popVy * popVy);
     this.speed = uh;
     this.state = "air";
+    this.nollie = false;
     this.catchWhileRising = false;
     this.spin.reset();
     this.position.y += 0.02; // clear the ground so we don't re-land instantly
   }
 
-  private pop(id: TrickId, grade: number): void {
+  private pop(id: TrickId, grade: number, nollie = false): void {
     this.setCharging(false);
     this.driveT = 0; // the foot left the ground; the shove goes with it
     // A shove-it is a flat spin of the board, so it pops like an ollie; the
     // flips need the extra beat for the deck to come all the way round.
     const impulse = id === "ollie" || id === "shoveit" ? OLLIE_POP : KICKFLIP_POP;
     this.trickId = id;
-    this.trick = this.tricks.def(id).name;
+    // NOLLIE IS A NAME, NOT A SECOND TRICK. The board comes off the nose instead
+    // of the tail, so the pop is the same pop with the feet the other way round
+    // — same height, same flips, same clips from the waist up. What it changes
+    // is what the player is told he did, and which end of the deck lifts first.
+    this.trick = nollie ? nollieName(this.tricks.def(id).name) : this.tricks.def(id).name;
     this.setFlip(id);
     this.takeOff(grade, impulse);
+    this.nollie = nollie;
     // Paced to the air he ACTUALLY bought — popping off a transition buys more
     // than the impulse alone, and the clip is scrubbed to fit the hang time.
-    this.events.onPop?.(this.trick, (2 * Math.max(this.vy, 0)) / GRAVITY);
+    // The CLIP is asked for by the trick's own name: "Nollie Kickflip" is not a
+    // clip and never will be, and it is a kickflip from the waist up.
+    this.events.onPop?.(this.tricks.def(id).name, (2 * Math.max(this.vy, 0)) / GRAVITY);
   }
 
   /** Which way the deck comes round, and whether it comes round at all. */
@@ -2516,6 +2616,9 @@ export class SkateModel {
     const trick = this.trick;
     const trickId = this.trickId;
     this.state = "rolling";
+    // Feet down ends the "not that line" window he opened by popping out of it.
+    this.noRecatchId = null;
+    this.noRecatchT = 0;
     // Which way he rides away — and he rides away the way he was already GOING.
     //
     // One question, asked of the geometry and nothing else: is the nose still
@@ -2753,6 +2856,7 @@ export class SkateModel {
       speed: this.speed,
       stance: this.stance,
       grounded,
+      popped: this.catchWhileRising,
     };
     const state = this.grind.catch(q, rails);
     if (!state) return false;
@@ -2776,7 +2880,26 @@ export class SkateModel {
     // (every hop across a kerb) it would drop the air's own peak to wherever the
     // board was mid-flight — the same class of lie about the crest as the stale
     // peak in the header, told the other way round.
+    // …UNLESS THE LINE IS UP IN THE AIR. That measurement is a statement about
+    // SQUARE ACROSS IS A HOP. A deck laid across a bar is a boardslide, and an
+    // ollie over the same bar on the way somewhere else is the same approach,
+    // the same arc and the same frame — so the deck's angle cannot tell them
+    // apart and only the player can. E is the whole of the answer, and it is
+    // asked of every line, raised or flush: a handrail you popped clean over
+    // must stay over. The other half of the player's own ask — *"pop in and out
+    // of grinds"* — is the RISING case below (`catchWhileRising`): a pop thrown
+    // off a line may take the same line again without being asked twice.
+    //
+    // A wing of this was tried the other way — raised lines auto-catching a
+    // square hop — and it read as the game taking the ollie away from him: the
+    // measured symptom was every handrail he cleared from the ground snapping
+    // him onto it instead (`tools/input-matrix.mjs`, the bar he declined is
+    // still steel). So the gate is geometry-blind on purpose.
     if (this.grind.squareEntry && !this.slideWanted) return false;
+
+    // The line he just popped out of is not offered back to him: see
+    // `noRecatchId`. Anything else in the plaza still is.
+    if (this.noRecatchT > 0 && state.line.id === this.noRecatchId) return false;
 
     // A lock-on is a TELEPORT — `place` puts the board on the line, wherever
     // that is — so it is asked the same question every step of the ride is
@@ -2926,7 +3049,10 @@ export class SkateModel {
     // over its length hands him that drop as vertical, exactly as a lip does.
     if (input.olliePressed) {
       const grade = railGrade(state);
+      const left = state.line.id;
       this.endGrind(false);
+      this.noRecatchId = left;
+      this.noRecatchT = 1.5;
       this.pop("ollie", grade);
       // …and `catchWhileRising` is deliberately NOT set: this air began by
       // leaving a line on purpose, so `flight()` will not offer him one again
@@ -3194,6 +3320,127 @@ export class SkateModel {
     this.spin.reset();
     this.events.onRagdoll?.(_impact);
     this.events.onBail?.(trick);
+  }
+
+  // -------------------------------------------------------------------------
+  // on foot — the board left standing, and him walking
+  // -------------------------------------------------------------------------
+
+  /**
+   * He is off the board. Not a state in `SkateState` on purpose: every system
+   * that reads `state` is a system about a board — grinds, flips, the pump, the
+   * landing — and walking is the absence of all of them rather than a fifth
+   * version of each. `state` stays "rolling" so the camera, the HUD and the rig
+   * keep one world to read; `onFoot` is the switch the update turns on first.
+   */
+  private onFoot = false;
+  /** Where the deck is standing while he walks, or null when he is riding it. */
+  boardPark: { x: number; y: number; z: number; heading: number; stance: Stance } | null = null;
+  /** How close he has to be to step back on, metres. */
+  private static readonly REMOUNT_REACH = 2.5;
+  private static readonly WALK_SPEED = 2.3;
+  private static readonly WALK_BACK = 1.1;
+  private static readonly WALK_ACCEL = 9;
+  private static readonly WALK_TURN = 2.5;
+
+  get walking(): boolean {
+    return this.onFoot;
+  }
+
+  /**
+   * Y. Off the board where he stands, or back on it if he is within reach of it.
+   *
+   * The deck keeps the heading and the stance he left it in, so stepping back on
+   * puts him down the same line — the same rule the session marker follows. He
+   * cannot step off in the air or mid-grind: there is no floor to stand on.
+   */
+  private toggleBoard(): void {
+    if (!this.onFoot) {
+      if (this.state !== "rolling") return;
+      this.boardPark = {
+        x: this.position.x,
+        y: this.position.y,
+        z: this.position.z,
+        heading: this.heading,
+        stance: this.stance,
+      };
+      this.onFoot = true;
+      // …and he steps off BESIDE it rather than through it. Half a metre to his
+      // right — the side a regular-footed skater steps off — so the deck he just
+      // left is a thing he can see and walk back to instead of something under
+      // his shoes.
+      const sideX = Math.cos(this.heading);
+      const sideZ = -Math.sin(this.heading);
+      const offX = this.position.x + sideX * 0.6;
+      const offZ = this.position.z + sideZ * 0.6;
+      if (!this.surface.blocked(offX, offZ, this.position.y + WALL_PROBE)) {
+        this.position.x = offX;
+        this.position.z = offZ;
+        this.position.y = this.surface.height(offX, offZ, this.position.y + HINT_LIFT);
+      }
+      this.speed = 0;
+      this.vy = 0;
+      this.trick = null;
+      this.trickId = null;
+      this.setCharging(false);
+      this.holding = null;
+      this.events.onBoard?.(false);
+      return;
+    }
+    const park = this.boardPark;
+    if (!park) return;
+    const reach = Math.hypot(this.position.x - park.x, this.position.z - park.z);
+    if (reach > SkateModel.REMOUNT_REACH) return;
+    this.onFoot = false;
+    this.boardPark = null;
+    this.position.set(park.x, park.y, park.z);
+    this.heading = park.heading;
+    this.faceHeading = park.heading;
+    this.speed = 0;
+    this.vy = 0;
+    this.state = "rolling";
+    this.setStance(park.stance);
+    this.events.onBoard?.(true);
+  }
+
+  /**
+   * Walking. The same controls move him — W pushes, A/D turn, S backs up — at a
+   * speed and a turn rate a person has rather than a board. No tricks, no
+   * grind, no pop: the update returns here, so nothing below it can fire.
+   */
+  private updateOnFoot(input: SkateInput, dt: number): void {
+    const steer = THREE.MathUtils.clamp(input.steer, -1, 1);
+    // Minus, the same way the ride turns: screen-right is decreasing heading.
+    if (steer !== 0) this.heading -= steer * SkateModel.WALK_TURN * dt;
+    const target = input.throttle
+      ? SkateModel.WALK_SPEED
+      : input.brake
+        ? -SkateModel.WALK_BACK
+        : 0;
+    const rate = SkateModel.WALK_ACCEL * dt;
+    this.speed =
+      this.speed < target
+        ? Math.min(target, this.speed + rate)
+        : Math.max(target, this.speed - rate);
+    if (this.speed !== 0) {
+      const dx = this.forwardX * this.speed * dt;
+      const dz = this.forwardZ * this.speed * dt;
+      const nx = this.position.x + dx;
+      const nz = this.position.z + dz;
+      if (!this.surface.blocked(nx, nz, this.position.y + WALL_PROBE)) {
+        this.position.x = nx;
+        this.position.z = nz;
+      } else {
+        this.speed = 0;
+      }
+    }
+    const ground = this.surface.height(this.position.x, this.position.z, this.position.y + HINT_LIFT);
+    this.position.y = ground;
+    const sample = this.surface.sample(this.position.x, this.position.z, this.position.y + HINT_LIFT, this.sample);
+    this.surfaceKind = sample.kind;
+    this.surfaceNormal.lerp(sample.normal, 1 - Math.exp(-NORMAL_FOLLOW * dt)).normalize();
+    this.lean = THREE.MathUtils.damp(this.lean, 0, 8, dt);
+    this.boardPitch = THREE.MathUtils.damp(this.boardPitch, 0, 10, dt);
   }
 
   private updateRagdoll(dt: number): void {

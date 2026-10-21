@@ -79,6 +79,7 @@ export type TouchControlCode =
   | "ShiftLeft"
   | "KeyQ"
   | "KeyE"
+  | "KeyY"
   | "KeyR";
 
 /**
